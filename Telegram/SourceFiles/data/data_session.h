@@ -606,6 +606,7 @@ public:
 		ChannelData *channel,
 		const MTPmessages_Messages &data);
 	void processNonChannelMessagesDeleted(const QVector<MTPint> &data);
+	void keepSavedDeleted(std::vector<not_null<HistoryItem*>> &items);
 	void processMessagesDeleted(
 		PeerId peerId,
 		const QVector<MTPint> &data);

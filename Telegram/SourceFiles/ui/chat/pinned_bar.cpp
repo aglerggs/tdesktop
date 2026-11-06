@@ -39,7 +39,23 @@ PinnedBar::PinnedBar(
 
 	_wrap.entity()->paintRequest(
 	) | rpl::on_next([=](QRect clip) {
-		QPainter(_wrap.entity()).fillRect(clip, st::historyPinnedBg);
+		const auto entity = _wrap.entity();
+		auto p = QPainter(entity);
+		if (!_glass || !_glassBackdrop) {
+			p.fillRect(clip, st::historyPinnedBg);
+			return;
+		}
+		const auto shape = entity->rect().marginsRemoved(
+			st::historyPinnedGlassMargins);
+		if (shape.isEmpty()) {
+			return;
+		}
+		const auto margin = _glass->backdropMargin();
+		const auto global = entity->mapToGlobal(QPoint());
+		auto backdrop = _glassBackdrop(shape.marginsAdded(
+			{ margin, margin, margin, margin }).translated(global));
+		backdrop.rect.translate(-global);
+		_glass->paint(p, shape, backdrop);
 	}, lifetime());
 	_wrap.setAttribute(Qt::WA_OpaquePaintEvent);
 
@@ -144,12 +160,36 @@ void PinnedBar::setShadowGeometryPostprocess(Fn<QRect(QRect)> postprocess) {
 	updateShadowGeometry(_wrap.geometry());
 }
 
+void PinnedBar::setGlassBackdrop(
+		Ui::LiquidGlass::BackdropProvider provider) {
+	if (!Ui::LiquidGlass::Enabled() || !provider) {
+		return;
+	}
+	_glassBackdrop = std::move(provider);
+	if (!_glass) {
+		_glass = std::make_unique<Ui::LiquidGlass::Surface>();
+		const auto refresh = [=] {
+			_glass->setStyle(Ui::LiquidGlass::MakeStyle(
+				st::historyPinnedBg->c,
+				st::historyPinnedGlassRadius));
+			_wrap.entity()->update();
+		};
+		refresh();
+		style::PaletteChanged(
+		) | rpl::on_next(refresh, lifetime());
+	}
+	// The messages are seen around the floating capsule.
+	_wrap.setAttribute(Qt::WA_OpaquePaintEvent, false);
+	updateShadowGeometry(_wrap.geometry());
+	_wrap.entity()->update();
+}
+
 void PinnedBar::updateShadowGeometry(QRect wrapGeometry) {
 	const auto regular = QRect(
 		wrapGeometry.x(),
 		wrapGeometry.y() + wrapGeometry.height(),
 		wrapGeometry.width(),
-		st::lineWidth);
+		_glass ? 0 : st::lineWidth);
 	_shadow->setGeometry(_shadowGeometryPostprocess
 		? _shadowGeometryPostprocess(regular)
 		: regular);

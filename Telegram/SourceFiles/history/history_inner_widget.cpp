@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
 
+#include "data/data_saved_deleted.h"
+
 #include "api/api_polls.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
@@ -3143,6 +3145,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			: item->allowsEdit(t)
 			? item
 			: nullptr;
+		if (::Data::SavedDeleted::HasEdits(item)) {
+			const auto historyItemId = item->fullId();
+			_menu->addAction(u"История правок"_q, [=] {
+				if (const auto item = session->data().message(historyItemId)) {
+					::Data::SavedDeleted::ShowEditsBox(_controller, item);
+				}
+			}, &st::menuIconEdit);
+		}
 		if (editItem) {
 			const auto editItemId = editItem->fullId();
 			_menu->addAction(tr::lng_context_edit_msg(tr::now), [=] {

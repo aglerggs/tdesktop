@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
+#include "data/data_saved_deleted.h"
+
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
 #include "menu/menu_mark_as_read.h"
@@ -330,6 +332,7 @@ private:
 	void addDirectMessages();
 	void addToggleTopicClosed();
 	void addExportChat();
+	void addSavedDeleted();
 	void addTranslate();
 	void addReport();
 	void addNewContact();
@@ -1078,6 +1081,18 @@ void Filler::addExportChat() {
 		tr::lng_profile_export_chat(tr::now),
 		[=] { PeerMenuExportChat(navigation, peer); },
 		&st::menuIconExport);
+}
+
+void Filler::addSavedDeleted() {
+	if (_thread->asTopic() || !Data::SavedDeleted::HasDeleted(_peer)) {
+		return;
+	}
+	const auto peer = _peer;
+	const auto controller = _controller;
+	_addAction(
+		u"Удалённые сообщения"_q,
+		[=] { Data::SavedDeleted::ShowDeletedBox(controller, peer); },
+		&st::menuIconDelete);
 }
 
 void Filler::addTranslate() {
@@ -1950,6 +1965,7 @@ void Filler::fillHistoryActions() {
 	addViewDiscussion();
 	addDirectMessages();
 	addExportChat();
+	addSavedDeleted();
 	addTranslate();
 	addReport();
 	addClearHistory();

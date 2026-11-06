@@ -80,6 +80,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_options.h"
 #include "ui/effects/spoiler_mess.h"
 #include "ui/effects/liquid_glass.h"
+#include "data/data_saved_deleted.h"
 #include "ui/cached_round_corners.h"
 #include "ui/power_saving.h"
 #include "ui/screen_reader_mode.h"
@@ -319,6 +320,7 @@ void Application::run() {
 
 	// Before any widget, the glass is chosen once per run.
 	Ui::LiquidGlass::LoadSettings(cWorkingDir() + u"tdata/liquid_glass.json"_q);
+	Data::SavedDeleted::LoadSettings(cWorkingDir() + u"tdata/"_q);
 
 	style::SetCustomFont(settings().customFontFamily());
 	style::internal::StartFonts();

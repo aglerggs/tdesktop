@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_session.h"
 
+#include "data/data_saved_deleted.h"
+
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "main/main_app_config.h"
@@ -3072,12 +3074,20 @@ void Session::updateEditedMessage(const MTPMessage &data) {
 	if (existing->isLocalUpdateMedia() && data.type() == mtpc_message) {
 		updateExistingMessage(data.c_message());
 	}
+	const auto previousText = existing->originalText().text;
+	const auto previousDate = [&] {
+		const auto edited = existing->Get<HistoryMessageEdited>();
+		return edited ? edited->date : existing->date();
+	}();
 	data.match([](const MTPDmessageEmpty &) {
 	}, [&](const MTPDmessageService &data) {
 		existing->applyEdition(data);
 	}, [&](const auto &data) {
 		existing->applyEdition(HistoryMessageEdition(_session, data));
 	});
+	if (existing->originalText().text != previousText) {
+		SavedDeleted::RememberEdit(existing, previousText, previousDate);
+	}
 }
 
 void Session::processMessages(
@@ -3361,6 +3371,7 @@ void Session::processMessagesDeleted(
 			affected->unknownMessageDeleted(messageId.v);
 		}
 	}
+	keepSavedDeleted(toDestroy);
 	if (!toDestroy.empty()) {
 		notifyItemsAboutToBeDestroyed(toDestroy);
 		for (const auto &item : toDestroy) {
@@ -3374,6 +3385,19 @@ void Session::processMessagesDeleted(
 	}
 }
 
+void Session::keepSavedDeleted(
+		std::vector<not_null<HistoryItem*>> &items) {
+	// Messages deleted by others stay with a mark, see SavedDeleted.
+	items.erase(ranges::remove_if(items, [&](not_null<HistoryItem*> item) {
+		if (!SavedDeleted::ShouldKeep(item)) {
+			return false;
+		}
+		SavedDeleted::Keep(item);
+		requestItemViewRefresh(item);
+		return true;
+	}), end(items));
+}
+
 void Session::processNonChannelMessagesDeleted(const QVector<MTPint> &data) {
 	Tgw::ClearNonChannelStorage(_session, data);
 	auto toDestroy = std::vector<not_null<HistoryItem*>>();
@@ -3385,6 +3409,7 @@ void Session::processNonChannelMessagesDeleted(const QVector<MTPint> &data) {
 			historiesToCheck.emplace(history);
 		}
 	}
+	keepSavedDeleted(toDestroy);
 	if (!toDestroy.empty()) {
 		notifyItemsAboutToBeDestroyed(toDestroy);
 		for (const auto &item : toDestroy) {

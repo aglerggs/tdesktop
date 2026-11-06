@@ -62,6 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "ui/effects/liquid_glass.h"
+#include "data/data_saved_deleted.h"
 #include "ui/widgets/continuous_sliders.h"
 
 #include <QtWidgets/QApplication>
@@ -851,6 +852,33 @@ void SetupLiquidGlass(
 				repaintAll();
 			});
 	};
+	const auto themes = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		st::settingsCheckboxPadding);
+	const auto addTheme = [&](const QString &title, const QString &path) {
+		const auto button = Ui::CreateChild<Ui::RoundButton>(
+			themes,
+			rpl::single(title),
+			st::defaultLightButton);
+		button->setClickedCallback([=] {
+			if (Window::Theme::Apply(path)) {
+				Window::Theme::KeepApplied();
+			}
+		});
+		return button;
+	};
+	const auto day = addTheme(
+		u"Тема Liquid Day"_q,
+		u":/gui/liquid-day.tdesktop-theme"_q);
+	const auto night = addTheme(
+		u"Тема Liquid Night"_q,
+		u":/gui/liquid-night.tdesktop-theme"_q);
+	themes->resize(themes->width(), day->height());
+	themes->widthValue() | rpl::on_next([=](int width) {
+		day->moveToLeft(0, 0);
+		night->moveToLeft(day->width() + st::normalFont->spacew * 2, 0);
+	}, themes->lifetime());
+
 	addSlider(
 		u"Размытие"_q,
 		kMinBlur,
@@ -873,6 +901,26 @@ void SetupLiquidGlass(
 			settings.tint = value;
 			SetSettings(settings);
 		});
+
+	Ui::AddSkip(container);
+	const auto keepDeleted = container->add(
+		object_ptr<Ui::Checkbox>(
+			container,
+			u"Сохранять удалённые сообщения и историю правок"_q,
+			Data::SavedDeleted::Enabled(),
+			st::settingsCheckbox),
+		st::settingsCheckboxPadding);
+	keepDeleted->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		Data::SavedDeleted::SetEnabled(checked);
+	}, keepDeleted->lifetime());
+	Ui::AddDividerText(
+		container,
+		rpl::single(u"Удалённые собеседниками сообщения остаются в чате "
+			"с пометкой, после перезапуска — в меню чата «Удалённые "
+			"сообщения». Хранятся только на этом компьютере, в папке "
+			"tdata, без шифрования. Сообщения с таймером и «на один "
+			"просмотр» не сохраняются."_q));
 	Ui::AddSkip(container);
 }
 

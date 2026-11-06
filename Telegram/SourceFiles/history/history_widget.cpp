@@ -10001,6 +10001,13 @@ void HistoryWidget::checkPinnedBarState() {
 		return std::move(content);
 	}));
 
+	_pinnedBar->setGlassBackdrop([=](QRect global) {
+		const auto shift = mapToGlobal(QPoint());
+		auto result = grabGlassBackdrop(global.translated(-shift));
+		result.rect.translate(shift);
+		return result;
+	});
+
 	controller()->adaptive().oneColumnValue(
 	) | rpl::on_next([=, raw = _pinnedBar.get()](bool one) {
 		raw->setShadowGeometryPostprocess([=](QRect geometry) {

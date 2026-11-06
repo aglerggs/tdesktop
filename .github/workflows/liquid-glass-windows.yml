@@ -71,6 +71,16 @@ jobs:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
+      - name: Apply Liquid Glass submodule patches.
+        shell: bash
+        run: |
+          cd "$TBUILD/$REPO_NAME"
+          for f in patches/lib_ui/*.patch; do
+            [ -e "$f" ] || continue
+            echo "Applying $f"
+            git -C Telegram/lib_ui apply --whitespace=nowarn "../../$f"
+          done
+
       - name: First set up.
         shell: bash
         run: |
