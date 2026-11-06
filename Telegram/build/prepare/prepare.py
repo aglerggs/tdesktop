@@ -1776,7 +1776,7 @@ win:
     SET CONFIGURATIONS=-debug
     SET ASSERTS=
 release:
-    SET CONFIGURATIONS=-release
+    SET CONFIGURATIONS=-debug-and-release
 win_asserts:
     SET ASSERTS=-force-asserts
 win:
