@@ -94,6 +94,10 @@ public:
 	void updateJumpDownVisibility(std::optional<int> counter = {});
 	void updatePositions();
 
+	// Space at the bottom of the scroll area covered by something else,
+	// the buttons are placed above it.
+	void setBottomSkip(int skip);
+
 	[[nodiscard]] rpl::producer<> stashClicks() const;
 	void setStashMenuFiller(Fn<void(not_null<Ui::PopupMenu*>)> filler);
 
@@ -138,6 +142,7 @@ private:
 	// lets that column sort them by position, and lets the parent place the
 	// whole group after the list instead of before it.
 	Ui::RpWidget _column;
+	int _bottomSkip = 0;
 	QRegion _columnMask;
 
 	CornerButton _down;

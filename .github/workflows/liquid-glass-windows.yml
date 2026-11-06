@@ -1,0 +1,262 @@
+name: Liquid Glass (Windows x64)
+
+# Builds the fork for Windows x64 and uploads Telegram.exe as an artifact.
+#
+# The first build has to compile all the libraries (Qt, WebRTC, FFmpeg...),
+# it may not fit into one 6-hour run. The progress is cached, so if the run
+# stops on the libraries step - just run the workflow again, it continues.
+#
+# Optional repository secrets (Settings - Secrets and variables - Actions):
+#   TDESKTOP_API_ID, TDESKTOP_API_HASH - your own from https://my.telegram.org
+# Without them the limited test credentials are used.
+
+on:
+  push:
+    branches:
+      - liquid-glass
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+      - 'snap/**'
+      - 'lib/xdg/**'
+      - 'Telegram/SourceFiles/platform/linux/**'
+      - 'Telegram/SourceFiles/platform/mac/**'
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: 'Build configuration'
+        type: choice
+        options:
+          - Release
+          - Debug
+        default: Release
+
+concurrency:
+  group: liquid-glass-windows-${{ github.ref }}
+  # Never cancel: a cancelled run loses the libraries it was building.
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    env:
+      CONFIGURATION: ${{ inputs.configuration || 'Release' }}
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: First set up.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "$CONFIGURATION" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+          if [ "$CONFIGURATION" == "Debug" ]; then
+            echo "PREPARE_FLAGS=skip-release" >> $GITHUB_ENV
+          else
+            echo "PREPARE_FLAGS=" >> $GITHUB_ENV
+          fi
+
+          echo "Configurate git for cherry-picks."
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - uses: Eden-CI/msvc-dev-cmd@master
+        name: Native Tools Command Prompt.
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+          toolset: '14.44'
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Restore ThirdParty.
+        id: restore-third-party
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: win64-${{ env.CONFIGURATION }}-third-party-${{ env.CACHE_KEY }}
+          restore-keys: win64-${{ env.CONFIGURATION }}-third-party-
+
+      - name: Restore libraries.
+        id: restore-libs
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-${{ env.CONFIGURATION }}-libs-${{ env.CACHE_KEY }}-none
+          restore-keys: |
+            win64-${{ env.CONFIGURATION }}-libs-${{ env.CACHE_KEY }}-
+            win64-${{ env.CONFIGURATION }}-libs-
+
+      - name: Restore Qt.
+        id: restore-qt
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-${{ env.CONFIGURATION }}-qt6-${{ env.CACHE_KEY }}-none
+          restore-keys: |
+            win64-${{ env.CONFIGURATION }}-qt6-${{ env.CACHE_KEY }}-
+            win64-${{ env.CONFIGURATION }}-qt6-
+
+      - name: Remember the libraries state.
+        shell: bash
+        run: |
+          state() {
+            # Names and contents of the finished libraries keys.
+            ( cd "$LibrariesPath/cache_keys" 2>/dev/null && for f in $(ls -1 | sort); do
+              case "$f" in [qQ]t[_-]*) [ "$1" == "qt" ] || continue;; *) [ "$1" == "qt" ] && continue;; esac
+              echo "$f"; cat "$f"; echo
+            done ) | sha256sum | cut -c1-16
+          }
+          echo "LIBS_BEFORE=$(state libs)" >> $GITHUB_ENV
+          echo "QT_BEFORE=$(state qt)" >> $GITHUB_ENV
+
+      - name: Libraries.
+        id: libraries
+        # Leave time to save the progress if the libraries do not fit.
+        timeout-minutes: 290
+        continue-on-error: true
+        run: |
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent qt6 %PREPARE_FLAGS%
+
+      - name: Free up some disk space.
+        if: always()
+        shell: bash
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete || true
+
+      - name: Check the libraries state.
+        if: always()
+        shell: bash
+        run: |
+          state() {
+            # Names and contents of the finished libraries keys.
+            ( cd "$LibrariesPath/cache_keys" 2>/dev/null && for f in $(ls -1 | sort); do
+              case "$f" in [qQ]t[_-]*) [ "$1" == "qt" ] || continue;; *) [ "$1" == "qt" ] && continue;; esac
+              echo "$f"; cat "$f"; echo
+            done ) | sha256sum | cut -c1-16
+          }
+          echo "LIBS_AFTER=$(state libs)" >> $GITHUB_ENV
+          echo "QT_AFTER=$(state qt)" >> $GITHUB_ENV
+          echo "Libraries: $LIBS_BEFORE -> $(state libs), Qt: $QT_BEFORE -> $(state qt)"
+
+      - name: Save ThirdParty.
+        if: always() && steps.restore-third-party.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: win64-${{ env.CONFIGURATION }}-third-party-${{ env.CACHE_KEY }}
+
+      - name: Save libraries.
+        if: always() && env.LIBS_BEFORE != env.LIBS_AFTER
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-${{ env.CONFIGURATION }}-libs-${{ env.CACHE_KEY }}-${{ env.LIBS_AFTER }}
+
+      - name: Save Qt.
+        if: always() && env.QT_BEFORE != env.QT_AFTER
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: win64-${{ env.CONFIGURATION }}-qt6-${{ env.CACHE_KEY }}-${{ env.QT_AFTER }}
+
+      - name: Stop if the libraries are not ready.
+        if: steps.libraries.outcome != 'success'
+        run: |
+          echo The libraries are not built completely yet, the progress is saved.
+          echo Run this workflow again to continue.
+          exit 1
+
+      - name: Read the API credentials.
+        shell: bash
+        env:
+          API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          if [ -n "$API_ID" ] && [ -n "$API_HASH" ]; then
+            echo "Using the API credentials from the repository secrets."
+            echo "TDESKTOP_BUILD_API=-D TDESKTOP_API_ID=$API_ID -D TDESKTOP_API_HASH=$API_HASH" >> $GITHUB_ENV
+          else
+            echo "::warning::TDESKTOP_API_ID / TDESKTOP_API_HASH secrets are not set, using the limited test credentials."
+            echo "TDESKTOP_BUILD_API=-D TDESKTOP_API_TEST=ON" >> $GITHUB_ENV
+          fi
+
+      - name: Telegram Desktop build.
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram
+
+          call configure.bat ^
+          x64 ^
+          qt6 ^
+          %TDESKTOP_BUILD_API% ^
+          -D CMAKE_CONFIGURATION_TYPES=%CONFIGURATION% ^
+          -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+
+          cmake --build ..\out --config %CONFIGURATION% --parallel
+
+      - name: Move artifact.
+        run: |
+          set OUT=%TBUILD%\%REPO_NAME%\out\%CONFIGURATION%
+          mkdir artifact
+          move %OUT%\Telegram.exe artifact/
+
+      - uses: actions/upload-artifact@v7
+        name: Upload artifact.
+        with:
+          name: LiquidGlass-Telegram-win64-${{ env.CONFIGURATION }}
+          path: artifact\
+          if-no-files-found: error
+          retention-days: 14

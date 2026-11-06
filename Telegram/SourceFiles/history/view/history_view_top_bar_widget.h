@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/unread_badge.h"
 #include "ui/effects/animations.h"
+#include "ui/effects/liquid_glass.h"
 #include "base/timer.h"
 #include "base/object_ptr.h"
 #include "base/weak_qptr.h"
@@ -133,6 +134,9 @@ public:
 		float64 narrowRatio);
 	void showPeerMenu();
 
+	// Liquid glass: paint the bar as glass over what the provider gives.
+	void setGlassBackdrop(Ui::LiquidGlass::BackdropProvider provider);
+
 protected:
 	void paintEvent(QPaintEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
@@ -188,6 +192,7 @@ private:
 	void connectingAnimationCallback();
 
 	void paintTopBar(Painter &p);
+	void paintGlass(QPainter &p);
 	[[nodiscard]] PeerData *titleNamePeer() const;
 	void paintStatus(
 		Painter &p,
@@ -273,6 +278,9 @@ private:
 	float64 _titleShownRatio = 1.;
 	bool _animatingMode = false;
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _connecting;
+
+	Ui::LiquidGlass::BackdropProvider _glassBackdrop;
+	std::unique_ptr<Ui::LiquidGlass::Surface> _glass;
 
 	SendActionPainter *_sendAction = nullptr;
 	std::optional<Data::ReportInput> _chooseForReportReason;

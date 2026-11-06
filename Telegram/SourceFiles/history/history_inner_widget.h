@@ -176,6 +176,23 @@ public:
 
 	void setItemsRevealHeight(int revealHeight);
 	void changeItemsRevealHeight(int revealHeight);
+
+	// Liquid glass: parts of the scroll area covered by glass bars.
+	// The list keeps its content out of them at the scroll edges.
+	void setGlassInsets(int top, int bottom);
+	[[nodiscard]] int glassInsetTop() const {
+		return _glassInsetTop;
+	}
+	[[nodiscard]] int glassInsetBottom() const {
+		return _glassInsetBottom;
+	}
+
+	// Paints a part of the list as a backdrop for a glass bar over it.
+	// Nothing is marked as read or viewed, no metrics are collected.
+	void renderGlassBackdrop(
+		QPainter &p,
+		QPoint targetOffset,
+		QRect source);
 	void checkActivation();
 	void recountHistoryGeometry(bool initial = false);
 	void updateSize();
@@ -324,6 +341,10 @@ protected:
 private:
 	friend class Tgw::ListSelection;
 	friend class Tgw::ListTouch;
+
+	// Top of a block of the given height centered in the part
+	// of the scroll area that is not covered by glass.
+	[[nodiscard]] int glassCenteredTop(int height) const;
 
 	[[nodiscard]] std::vector<Element*> accessibleElements() const;
 	[[nodiscard]] int accessibilityUnreadBarIndex() const;
@@ -611,6 +632,9 @@ private:
 	int _historyMarginTop = 0;
 	int _historyMarginBottom = 0;
 	int _revealHeight = 0;
+	int _glassInsetTop = 0;
+	int _glassInsetBottom = 0;
+	bool _glassGrabbing = false;
 	int _forumThreadBarWidth = 0;
 	Ui::PeerUserpicView _forumThreadBarUserpicView;
 

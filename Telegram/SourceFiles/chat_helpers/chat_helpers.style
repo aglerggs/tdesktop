@@ -1905,3 +1905,17 @@ aiComposeBodyLabel: FlatLabel(defaultFlatLabel) {
 		}
 	}
 }
+
+// Liquid glass compose: a floating capsule over the messages.
+historyGlassComposeSide: 10px;
+historyGlassComposeBottom: 10px;
+historyGlassComposeRadius: 27px;
+historyGlassComposeField: InputField(historyComposeField) {
+	textBg: transparent;
+}
+historyGlassAttachEmoji: EmojiButton(historyAttachEmoji) {
+	bg: transparent;
+}
+historyGlassRecordBar: RecordBar(defaultRecordBar) {
+	radius: 23px;
+}

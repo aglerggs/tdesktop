@@ -69,6 +69,11 @@ class Autocomplete;
 struct Contact;
 } // namespace Support
 
+namespace Ui::LiquidGlass {
+class Surface;
+struct Backdrop;
+} // namespace Ui::LiquidGlass
+
 namespace Ui {
 class InnerDropdown;
 class DropdownMenu;
@@ -659,6 +664,18 @@ private:
 	void sendInlineResult(InlineBots::ResultSelected result);
 
 	void drawField(Painter &p, const QRect &rect);
+
+	// Liquid glass: the compose area is a floating glass capsule and the
+	// top bar is a glass bar, the messages scroll under both of them.
+	void setupLiquidGlass();
+	[[nodiscard]] bool computeGlassComposeActive() const;
+	[[nodiscard]] bool computeGlassTopActive() const;
+	void refreshGlassComposeMargins();
+	void updateComposeGlassGeometry();
+	void paintComposeGlass(Painter &p, QRect clip);
+	[[nodiscard]] QRect composeGlassShape() const;
+	[[nodiscard]] QRect scrollVisibleGeometry() const;
+	[[nodiscard]] Ui::LiquidGlass::Backdrop grabGlassBackdrop(QRect rect);
 	void paintEditHeader(
 		Painter &p,
 		const QRect &rect,
@@ -1043,6 +1060,15 @@ private:
 
 	object_ptr<Ui::PlainShadow> _topShadow;
 	bool _inGrab = false;
+
+	Ui::RpWidget *_composeGlass = nullptr;
+	Ui::RpWidget *_composeGlassCatcher = nullptr;
+	std::unique_ptr<Ui::LiquidGlass::Surface> _composeGlassSurface;
+	int _glassInsetTop = 0; // Part of _scroll under the glass top bar.
+	int _glassInsetBottom = 0; // Part of _scroll under the glass compose.
+	int _glassSide = 0; // Compose controls inset from the sides.
+	int _glassBottom = 0; // Compose controls inset from the bottom.
+	bool _glassComposeShown = false;
 
 	int _topDelta = 0;
 

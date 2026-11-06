@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/jump_down_button.h"
 
 #include "ui/effects/ripple_animation.h"
+#include "ui/effects/liquid_glass.h"
 #include "ui/unread_badge_paint.h"
 #include "styles/style_chat_helpers.h"
 
@@ -41,6 +42,16 @@ void JumpDownButton::paintEvent(QPaintEvent *e) {
 	((over || down)
 		? _st.iconBelowOver
 		: _st.iconBelow).paint(p, _st.iconPosition, width());
+	if (Ui::LiquidGlass::Enabled()) {
+		// A glossy rim over the round button background.
+		const auto size = float64(_st.rippleAreaSize);
+		Ui::LiquidGlass::PaintShine(
+			p,
+			QRectF(QPointF(_st.rippleAreaPosition), QSizeF(size, size)),
+			size / 2.,
+			false,
+			(st::windowBg->c.lightnessF() < 0.5));
+	}
 	paintRipple(p, _st.rippleAreaPosition.x(), _st.rippleAreaPosition.y());
 	((over || down)
 		? _st.iconAboveOver

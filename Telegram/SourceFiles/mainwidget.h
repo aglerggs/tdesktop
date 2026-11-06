@@ -286,6 +286,13 @@ private:
 		bool fromBottom);
 	Window::SectionSlideParams prepareHistoryAnimation(PeerId historyPeerId);
 
+	// Liquid glass design: a soft dissolve when switching between chats
+	// in the wide layout, where there is no slide animation.
+	[[nodiscard]] bool chatSwitchFadeAllowed(
+		PeerId peerId,
+		const SectionShow &params) const;
+	void startChatSwitchFade(QPixmap cache);
+
 	bool saveSectionInStack(
 		const SectionShow &params,
 		Window::SectionWidget *newMainSection = nullptr);
@@ -356,6 +363,7 @@ private:
 	std::unique_ptr<Window::ConnectionState> _connecting;
 
 	const base::unique_qptr<Ui::PlainShadow> _sideShadow;
+	base::unique_qptr<Ui::RpWidget> _chatSwitchFade;
 	object_ptr<Ui::PlainShadow> _thirdShadow = { nullptr };
 	object_ptr<Ui::ResizeArea> _firstColumnResizeArea = { nullptr };
 	object_ptr<Ui::ResizeArea> _thirdColumnResizeArea = { nullptr };

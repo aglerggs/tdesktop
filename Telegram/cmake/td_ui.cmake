@@ -571,6 +571,8 @@ PRIVATE
     ui/effects/glare.h
     ui/effects/layer_backdrop.cpp
     ui/effects/layer_backdrop.h
+    ui/effects/liquid_glass.cpp
+    ui/effects/liquid_glass.h
     ui/effects/loading_element.cpp
     ui/effects/loading_element.h
     ui/effects/ministar_particles.cpp

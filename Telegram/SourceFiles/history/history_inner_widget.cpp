@@ -1134,6 +1134,9 @@ void HistoryInner::enumerateDates(Method method) {
 	// -1 means we didn't find a same-day with previous message yet.
 	auto lowestInOneDayItemBottom = -1;
 
+	// Floating dates stick below the glass top bar, not under it.
+	const auto stickyTop = _visibleAreaTop + _glassInsetTop;
+
 	auto dateCallback = [&](not_null<Element*> view, int itemtop, int itembottom) {
 		const auto item = view->data();
 		if (lowestInOneDayItemBottom < 0 && view->isInOneDayWithPrevious()) {
@@ -1142,10 +1145,10 @@ void HistoryInner::enumerateDates(Method method) {
 
 		// Call method on a date for all messages that have it and for those who are not showing it
 		// because they are in a one day together with the previous message if they are top-most visible.
-		if (view->displayDate() || (!item->isEmpty() && itemtop <= _visibleAreaTop)) {
+		if (view->displayDate() || (!item->isEmpty() && itemtop <= stickyTop)) {
 			// skip the date of history migrate item if it will be in migrated
 			if (itemtop < drawtop && item->history() == _history) {
-				if (itemtop > _visibleAreaTop) {
+				if (itemtop > stickyTop) {
 					// Previous item (from the _migrated history) is drawing date now.
 					return false;
 				}
@@ -1159,7 +1162,7 @@ void HistoryInner::enumerateDates(Method method) {
 				itemtop);
 
 			// Attach date to the top of the visible area with the same margin as it has in service message.
-			int dateTop = std::max(itemtop - collapsed, _visibleAreaTop)
+			int dateTop = std::max(itemtop - collapsed, stickyTop)
 				+ st::msgServiceMargin.top();
 
 			// Do not let the date go below the single-day messages pack bottom line.
@@ -1205,6 +1208,8 @@ void HistoryInner::enumerateForumThreadBars(Method method) {
 	// -1 means we didn't find a same-day with previous message yet.
 	auto lowestInOneBunchItemBottom = -1;
 
+	const auto stickyTop = _visibleAreaTop + _glassInsetTop;
+
 	auto barCallback = [&](not_null<Element*> view, int itemtop, int itembottom) {
 		const auto item = view->data();
 		if (lowestInOneBunchItemBottom < 0 && view->isInOneBunchWithPrevious()) {
@@ -1213,14 +1218,14 @@ void HistoryInner::enumerateForumThreadBars(Method method) {
 
 		// Call method on a bar for all messages that have it and for those who are not showing it
 		// because they are in a one day together with the previous message if they are top-most visible.
-		if (view->displayForumThreadBar() || (!item->isEmpty() && itemtop <= _visibleAreaTop)) {
+		if (view->displayForumThreadBar() || (!item->isEmpty() && itemtop <= stickyTop)) {
 			if (lowestInOneBunchItemBottom < 0) {
 				lowestInOneBunchItemBottom = itembottom - view->marginBottom();
 			}
 			// Attach bar to the top of the visible area with the same margin as it has in service message.
 			int barTop = std::max(
 				itemtop + view->displayedDateHeight(),
-				_visibleAreaTop + skip)
+				stickyTop + skip)
 				+ st::msgServiceMargin.top();
 
 			// Do not let the bar go below the single-bar messages pack bottom line.
@@ -1427,12 +1432,25 @@ void HistoryInner::startEffectOnRead(not_null<HistoryItem*> item) {
 	}
 }
 
+void HistoryInner::renderGlassBackdrop(
+		QPainter &p,
+		QPoint targetOffset,
+		QRect source) {
+	_glassGrabbing = true;
+	const auto guard = gsl::finally([&] {
+		_glassGrabbing = false;
+	});
+	Ui::RenderWidget(p, this, targetOffset, QRegion(source));
+}
+
 void HistoryInner::paintEvent(QPaintEvent *e) {
 	const auto overlapped = _controller->contentOverlapped(this, e);
 	const auto pendingResized = hasPendingResizedItems();
-	_readMetricsTracker->setScreenActive(!overlapped
-		&& !pendingResized
-		&& _widget->markingContentsRead());
+	if (!_glassGrabbing) {
+		_readMetricsTracker->setScreenActive(!overlapped
+			&& !pendingResized
+			&& _widget->markingContentsRead());
+	}
 	if (overlapped || pendingResized) {
 		return;
 	} else if (_recountedAfterPendingResizedItems) {
@@ -1479,8 +1497,13 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 		return;
 	}
 
-	_translateTracker->startBunch();
-	const auto metricsStale = base::take(_readMetricsStale);
+	// A glass backdrop paint is not a real one, it has no side effects.
+	const auto glassGrabbing = _glassGrabbing;
+	if (!glassGrabbing) {
+		_translateTracker->startBunch();
+	}
+	const auto metricsStale = !glassGrabbing
+		&& base::take(_readMetricsStale);
 	if (metricsStale) {
 		_readMetricsTracker->startBatch(_visibleAreaTop, _visibleAreaBottom);
 	}
@@ -1490,6 +1513,10 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 	auto startInteractions = base::flat_set<not_null<const Element*>>();
 	const auto markingAsViewed = _widget->markingContentsRead();
 	const auto guard = gsl::finally([&] {
+		if (glassGrabbing) {
+			_userpicsCache.clear();
+			return;
+		}
 		if (_pinnedItem) {
 			_translateTracker->add(_pinnedItem);
 		}
@@ -1521,6 +1548,9 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 			not_null<Element*> view,
 			int top,
 			int height) {
+		if (glassGrabbing) {
+			return;
+		}
 		_translateTracker->add(view);
 		const auto item = view->data();
 		if (metricsStale && height > 0) {
@@ -4585,9 +4615,11 @@ void HistoryInner::recountHistoryGeometry(bool initial) {
 	const auto visibleHeight = _scroll->height();
 	auto oldHistoryMarginTop = std::max(
 		visibleHeight - historyHeight() - _historyMarginBottom,
-		0);
+		_glassInsetTop);
 	if (aboutAboveHistory) {
-		accumulate_max(oldHistoryMarginTop, _aboutView->height);
+		accumulate_max(
+			oldHistoryMarginTop,
+			_aboutView->height + _glassInsetTop);
 	}
 
 	updateBotInfo(false);
@@ -4636,13 +4668,14 @@ void HistoryInner::recountHistoryGeometry(bool initial) {
 
 	if (const auto view = _aboutView ? _aboutView->view() : nullptr) {
 		_aboutView->height = view->resizeGetHeight(_contentWidth);
+		const auto aboutCentered = glassCenteredTop(_aboutView->height);
 		if (aboutAboveHistory) {
 			_aboutView->top = std::min(
 				_historyMarginTop - _aboutView->height,
-				std::max(0, (_scroll->height() - _aboutView->height) / 2));
+				aboutCentered);
 		} else {
 			_aboutView->top = std::max(
-				std::max(0, (_scroll->height() - _aboutView->height) / 2),
+				aboutCentered,
 				_historyMarginTop + historyHeight() - _historyMarginBottom);
 		}
 	} else if (_aboutView) {
@@ -4651,9 +4684,11 @@ void HistoryInner::recountHistoryGeometry(bool initial) {
 
 	auto newHistoryMarginTop = std::max(
 		visibleHeight - historyHeight() - _historyMarginBottom,
-		0);
+		_glassInsetTop);
 	if (aboutAboveHistory) {
-		accumulate_max(newHistoryMarginTop, _aboutView->height);
+		accumulate_max(
+			newHistoryMarginTop,
+			_aboutView->height + _glassInsetTop);
 	}
 
 	const auto marginDelta = newHistoryMarginTop - oldHistoryMarginTop;
@@ -4871,6 +4906,26 @@ void HistoryInner::changeItemsRevealHeight(int revealHeight) {
 	updateSize();
 }
 
+void HistoryInner::setGlassInsets(int top, int bottom) {
+	top = std::max(top, 0);
+	bottom = std::max(bottom, 0);
+	if (_glassInsetTop == top && _glassInsetBottom == bottom) {
+		return;
+	}
+	_glassInsetTop = top;
+	_glassInsetBottom = bottom;
+	// The geometry is recounted by the owner right after this call.
+}
+
+int HistoryInner::glassCenteredTop(int height) const {
+	const auto available = _scroll->height()
+		- _glassInsetTop
+		- _glassInsetBottom;
+	return std::max(
+		_glassInsetTop,
+		_glassInsetTop + (available - height) / 2);
+}
+
 void HistoryInner::updateSize() {
 	if (_thanosController) {
 		_thanosController->flushRemovals(historyHeight() - _revealHeight);
@@ -4887,24 +4942,29 @@ void HistoryInner::updateSize() {
 	if (aboutBelowHistory) {
 		accumulate_max(newHistoryMarginBottom, _aboutView->height);
 	}
+	newHistoryMarginBottom += _glassInsetBottom;
 	auto newHistoryMarginTop = std::max(
 		visibleHeight - itemsHeight - newHistoryMarginBottom,
-		0);
+		_glassInsetTop);
 	if (aboutAboveHistory) {
-		accumulate_max(newHistoryMarginTop, _aboutView->height);
+		accumulate_max(
+			newHistoryMarginTop,
+			_aboutView->height + _glassInsetTop);
 	}
 
 	if (_aboutView && _aboutView->height > 0) {
+		const auto aboutCentered = glassCenteredTop(_aboutView->height);
 		if (aboutAboveHistory) {
 			_aboutView->top = std::min(
 				newHistoryMarginTop - _aboutView->height,
-				std::max(0, (_scroll->height() - _aboutView->height) / 2));
+				aboutCentered);
 		} else {
 			_aboutView->top = std::max(
-				std::max(0, (_scroll->height() - _aboutView->height) / 2),
+				aboutCentered,
 				(newHistoryMarginTop
 					+ itemsHeight
 					+ newHistoryMarginBottom
+					- _glassInsetBottom
 					- _aboutView->height));
 		}
 	}

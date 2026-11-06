@@ -536,11 +536,49 @@ void TopBarWidget::paintEvent(QPaintEvent *e) {
 		: -st::topBarHeight;
 	const auto slidingTop = std::max(selectedButtonsTop, searchFieldTop);
 
-	p.fillRect(QRect(0, 0, width(), st::topBarHeight), st::topBarBg);
+	if (_glassBackdrop && _glass) {
+		paintGlass(p);
+	} else {
+		p.fillRect(QRect(0, 0, width(), st::topBarHeight), st::topBarBg);
+	}
 	if (slidingTop < 0) {
 		p.translate(0, slidingTop + st::topBarHeight);
 		paintTopBar(p);
 	}
+}
+
+void TopBarWidget::setGlassBackdrop(
+		Ui::LiquidGlass::BackdropProvider provider) {
+	if (!Ui::LiquidGlass::Enabled()) {
+		return;
+	}
+	_glassBackdrop = std::move(provider);
+	if (!_glassBackdrop) {
+		_glass = nullptr;
+		update();
+		return;
+	} else if (!_glass) {
+		_glass = std::make_unique<Ui::LiquidGlass::Surface>();
+		const auto refresh = [=] {
+			_glass->setStyle(Ui::LiquidGlass::MakeStyle(
+				st::topBarBg->c,
+				0,
+				RectPart::Bottom));
+			update();
+		};
+		refresh();
+		style::PaletteChanged(
+		) | rpl::on_next(refresh, lifetime());
+	}
+	update();
+}
+
+void TopBarWidget::paintGlass(QPainter &p) {
+	const auto shape = QRect(0, 0, width(), st::topBarHeight);
+	const auto margin = _glass->backdropMargin();
+	const auto backdrop = _glassBackdrop(
+		shape.marginsAdded({ margin, margin, margin, margin }));
+	_glass->paint(p, shape, backdrop);
 }
 
 void TopBarWidget::paintTopBar(Painter &p) {

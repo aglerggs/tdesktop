@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "support/support_helper.h"
 #include "ui/empty_userpic.h"
 #include "ui/painter.h"
+#include "ui/effects/liquid_glass.h"
 #include "ui/rect.h"
 #include "ui/power_saving.h"
 #include "ui/text/format_values.h"
@@ -484,12 +485,44 @@ void PaintRow(
 	if (swipeTranslation) {
 		p.translate(swipeMirrored ? swipeTranslation : -swipeTranslation, 0);
 	}
-	p.fillRect(geometry, bg);
+	// Liquid glass: the selection is a glossy pill inside the row.
+	const auto glassPill = Ui::LiquidGlass::Enabled()
+		&& (context.active || context.selected)
+		&& !context.narrow;
+	const auto pill = glassPill
+		? QRectF(geometry).marginsRemoved(
+			QMarginsF(st::dialogsGlassPillMargins))
+		: QRectF();
+	if (glassPill) {
+		p.fillRect(geometry, context.currentBg);
+		Ui::LiquidGlass::PaintPill(
+			p,
+			pill,
+			st::dialogsGlassPillRadius,
+			(context.active
+				? st::dialogsBgActive->c
+				: st::dialogsBgOver->c),
+			context.active);
+	} else {
+		p.fillRect(geometry, bg);
+	}
 	if (!(flags & Flag::TopicJumpRipple)) {
 		auto ripple = context.active
 			? st::dialogsRippleBgActive
 			: st::dialogsRippleBg;
-		row->paintRipple(p, 0, 0, context.width, &ripple->c);
+		if (glassPill) {
+			auto clip = QPainterPath();
+			clip.addRoundedRect(
+				pill,
+				st::dialogsGlassPillRadius,
+				st::dialogsGlassPillRadius);
+			p.save();
+			p.setClipPath(clip, Qt::IntersectClip);
+			row->paintRipple(p, 0, 0, context.width, &ripple->c);
+			p.restore();
+		} else {
+			row->paintRipple(p, 0, 0, context.width, &ripple->c);
+		}
 	}
 
 	if (flags & Flag::SavedMessages) {

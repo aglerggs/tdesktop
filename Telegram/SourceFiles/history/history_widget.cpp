@@ -67,6 +67,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/silent_toggle.h"
 #include "ui/screen_reader_mode.h"
 #include "ui/ui_utility.h"
+#include "ui/effects/liquid_glass.h"
+#include "mainwidget.h"
 #include "inline_bots/inline_bot_result.h"
 #include "base/event_filter.h"
 #include "base/options.h"
@@ -324,19 +326,31 @@ HistoryWidget::HistoryWidget(
 	st::historyComposeButton)
 , _reportMessages(this, QString(), st::historyComposeButton)
 , _attachToggle(this, st::historyAttach)
-, _tabbedSelectorToggle(this, st::historyAttachEmoji)
+, _tabbedSelectorToggle(
+	this,
+	(Ui::LiquidGlass::Enabled()
+		? st::historyGlassAttachEmoji
+		: st::historyAttachEmoji))
 , _botKeyboardShow(this, st::historyBotKeyboardShow)
 , _botKeyboardHide(this, st::historyBotKeyboardHide)
 , _botCommandStart(this, st::historyBotCommandStart)
 , _voiceRecordBar(std::make_unique<VoiceRecordBar>(
 	this,
-	controller->uiShow(),
-	_send,
-	st::historySendSize.height()))
+	HistoryView::Controls::VoiceRecordBarDescriptor{
+		.outerContainer = this,
+		.show = controller->uiShow(),
+		.send = _send,
+		.stOverride = (Ui::LiquidGlass::Enabled()
+			? &st::historyGlassRecordBar
+			: nullptr),
+		.recorderHeight = st::historySendSize.height(),
+	}))
 , _forwardPanel(std::make_unique<ForwardPanel>([=] { updateField(); }))
 , _field(
 	this,
-	st::historyComposeField,
+	(Ui::LiquidGlass::Enabled()
+		? st::historyGlassComposeField
+		: st::historyComposeField),
 	Ui::InputField::Mode::MultiLine,
 	tr::lng_message_ph())
 , _richDraftPreview(std::make_unique<HistoryView::Controls::RichDraftPreview>(
@@ -398,6 +412,7 @@ HistoryWidget::HistoryWidget(
 
 	_scroll->setHandleTouch(false);
 	_scroll->lockWheelDirection();
+	setupLiquidGlass();
 	const auto crossAxis = [=](QPoint delta, Qt::ScrollPhase phase) {
 		return _list && _list->consumeScrollAction(delta, phase);
 	};
@@ -586,7 +601,10 @@ HistoryWidget::HistoryWidget(
 		showPremiumToast(document);
 		return false;
 	});
-	InitMessageFieldFade(_field, st::historyComposeField.textBg);
+	if (!Ui::LiquidGlass::Enabled()) {
+		// The fades are painted in the opaque compose area color.
+		InitMessageFieldFade(_field, st::historyComposeField.textBg);
+	}
 
 	setupFastButtonMode();
 	initAiButton();
@@ -1976,8 +1994,12 @@ int HistoryWidget::itemTopForHighlight(
 			view = leader;
 		}
 	}
-	const auto itemTop = _list->itemTop(view);
-	Assert(itemTop >= 0);
+	const auto listItemTop = _list->itemTop(view);
+	Assert(listItemTop >= 0);
+
+	// All the results are scroll positions, so shifting the item by the
+	// glass top bar keeps it in the visible part of the list.
+	const auto itemTop = listItemTop - _glassInsetTop;
 
 	const auto item = view->data();
 	const auto unwatchedEffect = item->hasUnwatchedEffect();
@@ -1986,7 +2008,9 @@ int HistoryWidget::itemTopForHighlight(
 		? view->reactionButtonParameters({}, {}).center.y()
 		: -1;
 
-	const auto visibleAreaHeight = _scroll->height();
+	const auto visibleAreaHeight = _scroll->height()
+		- _glassInsetTop
+		- _glassInsetBottom;
 	const auto viewHeight = view->height();
 	const auto heightLeft = (visibleAreaHeight - viewHeight);
 	if (heightLeft >= 0) {
@@ -2221,6 +2245,13 @@ void HistoryWidget::applyInlineBotQuery(UserData *bot, const QString &query) {
 }
 
 void HistoryWidget::orderWidgets() {
+	if (_composeGlass) {
+		// The list scrolls under the top bar and the compose glass,
+		// so it is the lowest one, right above it lies the glass plate.
+		_composeGlassCatcher->lower();
+		_composeGlass->lower();
+		_scroll->lower();
+	}
 	_voiceRecordBar->raise();
 	_send->raise();
 	_aiButton->raise();
@@ -4270,6 +4301,8 @@ void HistoryWidget::updateControlsVisibility() {
 		if (fieldDisabledRemoved) {
 			_fieldDisabled = nullptr;
 		}
+		// The glass plate is hidden together with all the children.
+		updateComposeGlassGeometry();
 	});
 	const auto hideField = [&] {
 		if (!_field->isHidden()) {
@@ -6639,9 +6672,9 @@ void HistoryWidget::mouseMoveEvent(QMouseEvent *e) {
 void HistoryWidget::updateOverStates(QPoint pos) {
 	const auto isReadyToForward = readyToForward();
 	const auto detailsRect = QRect(
-		0,
+		_glassSide,
 		_field->y() - st::historySendPadding - st::historyReplyHeight,
-		width() - _fieldBarCancel->width(),
+		width() - 2 * _glassSide - _fieldBarCancel->width(),
 		st::historyReplyHeight);
 	const auto hasWebPage = !!_previewDrawPreview;
 	const auto inDetails = detailsRect.contains(pos)
@@ -6903,7 +6936,9 @@ bool HistoryWidget::floatPlayerHandleWheelEvent(QEvent *e) {
 }
 
 QRect HistoryWidget::floatPlayerAvailableRect() {
-	return _peer ? mapToGlobal(_scroll->geometry()) : mapToGlobal(rect());
+	return _peer
+		? mapToGlobal(scrollVisibleGeometry())
+		: mapToGlobal(rect());
 }
 
 bool HistoryWidget::readyToForward() const {
@@ -7658,8 +7693,10 @@ void HistoryWidget::updateSendAsFileGeometry() {
 }
 
 void HistoryWidget::moveFieldControls() {
+	refreshGlassComposeMargins();
+
 	auto keyboardHeight = 0;
-	auto bottom = height();
+	auto bottom = height() - _glassBottom;
 	auto maxKeyboardHeight = computeMaxFieldHeight() - fieldHeight();
 	_keyboard->resizeToWidth(width(), maxKeyboardHeight);
 	if (_kbShown) {
@@ -7673,7 +7710,7 @@ void HistoryWidget::moveFieldControls() {
 // (_botStart|_unblock|_joinChannel|_muteUnmute|_reportMessages)
 
 	auto buttonsBottom = bottom - _attachToggle->height();
-	auto left = st::historySendRight;
+	auto left = st::historySendRight + _glassSide;
 	if (_botMenu) {
 		const auto skip = st::historyBotMenuSkip;
 		_botMenu->moveToLeft(left + skip, buttonsBottom + skip);
@@ -7696,9 +7733,11 @@ void HistoryWidget::moveFieldControls() {
 			left,
 			bottom - fieldHeight() - st::historySendPadding);
 	}
-	auto right = st::historySendRight;
+	auto right = st::historySendRight + _glassSide;
 	_send->moveToRight(right, buttonsBottom); right += _send->width();
-	_voiceRecordBar->moveToLeft(0, bottom - _voiceRecordBar->height());
+	_voiceRecordBar->moveToLeft(
+		_glassSide,
+		bottom - _voiceRecordBar->height());
 	_tabbedSelectorToggle->moveToRight(right, buttonsBottom);
 	_botKeyboardHide->moveToRight(right, buttonsBottom);
 	right += _botKeyboardHide->width();
@@ -7732,17 +7771,17 @@ void HistoryWidget::moveFieldControls() {
 	updateDiscardRichDraftGeometry();
 
 	_fieldBarCancel->moveToRight(
-		0,
+		_glassSide,
 		_field->y() - st::historySendPadding - _fieldBarCancel->height());
 	if (_inlineResults) {
 		_inlineResults->moveBottom(_field->y() - st::historySendPadding);
 	}
 	if (_tabbedPanel) {
-		_tabbedPanel->moveBottomRight(buttonsBottom, width());
+		_tabbedPanel->moveBottomRight(buttonsBottom, width() - _glassSide);
 	}
 	if (_attachBotsMenu) {
 		_attachBotsMenu->moveToLeft(
-			0,
+			_glassSide,
 			buttonsBottom - _attachBotsMenu->height());
 	}
 
@@ -7759,11 +7798,15 @@ void HistoryWidget::moveFieldControls() {
 	if (_sendRestriction) {
 		_sendRestriction->setGeometry(fullWidthButtonRect);
 	}
+	updateComposeGlassGeometry();
 }
 
 void HistoryWidget::updateFieldSize() {
+	refreshGlassComposeMargins();
+
 	const auto kbShowShown = _history && !_kbShown && _keyboard->hasMarkup();
 	auto fieldWidth = width()
+		- 2 * _glassSide
 		- _attachToggle->width()
 		- st::historySendRight
 		- _send->width()
@@ -8364,6 +8407,8 @@ void HistoryWidget::resizeEvent(QResizeEvent *e) {
 void HistoryWidget::updateControlsGeometry() {
 	const auto width = this->width();
 
+	refreshGlassComposeMargins();
+
 	_topBar->resizeToWidth(width);
 	_topBar->moveToLeft(0, 0);
 
@@ -8372,7 +8417,7 @@ void HistoryWidget::updateControlsGeometry() {
 		: 0;
 	const auto innerWidth = width - tabsLeftSkip;
 
-	_voiceRecordBar->resizeToWidth(width);
+	_voiceRecordBar->resizeToWidth(width - 2 * _glassSide);
 
 	moveFieldControls();
 
@@ -8429,13 +8474,18 @@ void HistoryWidget::updateControlsGeometry() {
 	_topBars->resize(
 		innerWidth,
 		scrollAreaTop - _topBars->y() + st::lineWidth);
-	if (_scroll->y() != scrollAreaTop || _scroll->x() != tabsLeftSkip) {
-		_scroll->moveToLeft(tabsLeftSkip, scrollAreaTop);
+
+	// With the glass top bar the list goes up to the very top
+	// and keeps its content below the bars with an inset.
+	_glassInsetTop = computeGlassTopActive() ? scrollAreaTop : 0;
+	const auto scrollTop = scrollAreaTop - _glassInsetTop;
+	if (_scroll->y() != scrollTop || _scroll->x() != tabsLeftSkip) {
+		_scroll->moveToLeft(tabsLeftSkip, scrollTop);
 		if (_autocomplete) {
-			_autocomplete->setBoundings(_scroll->geometry());
+			_autocomplete->setBoundings(scrollVisibleGeometry());
 		}
 		if (_supportAutocomplete) {
-			_supportAutocomplete->setBoundings(_scroll->geometry());
+			_supportAutocomplete->setBoundings(scrollVisibleGeometry());
 		}
 	}
 
@@ -8465,7 +8515,8 @@ void HistoryWidget::updateControlsGeometry() {
 		topShadowLeft,
 		_topBar->bottomNoMargins(),
 		width - topShadowLeft - topShadowRight,
-		st::lineWidth);
+		_glassInsetTop ? 0 : st::lineWidth);
+	updateComposeGlassGeometry();
 }
 
 void HistoryWidget::itemRemoved(not_null<const HistoryItem*> item) {
@@ -8560,7 +8611,7 @@ int HistoryWidget::countInitialScrollTop() {
 		createUnreadBarIfBelowVisibleArea(0);
 		return 0;
 	} else if (const auto top = unreadBarTop()) {
-		return *top;
+		return std::max(*top - _glassInsetTop, 0);
 	} else {
 		_history->calculateFirstUnreadMessage();
 		return countAutomaticScrollTop();
@@ -8712,6 +8763,11 @@ void HistoryWidget::updateHistoryGeometry(
 	if (_businessBotStatus) {
 		newScrollHeight -= _businessBotStatus->bar().height();
 	}
+	// Everything above the list: the top bar and all the bars under it.
+	const auto topPartHeight = height() - newScrollHeight;
+	_glassInsetTop = computeGlassTopActive() ? topPartHeight : 0;
+
+	auto composeAreaHeight = 0;
 	if (isChoosingTheme()) {
 		newScrollHeight -= _chooseTheme->height();
 	} else if (!editingMessage()
@@ -8724,7 +8780,7 @@ void HistoryWidget::updateHistoryGeometry(
 		newScrollHeight -= _unblock->height();
 	} else {
 		if (editingMessage() || _canSendMessages) {
-			newScrollHeight -= (fieldHeight() + 2 * st::historySendPadding);
+			composeAreaHeight += (fieldHeight() + 2 * st::historySendPadding);
 		} else if (_sendRestriction) {
 			newScrollHeight -= _sendRestriction->height();
 		}
@@ -8733,12 +8789,28 @@ void HistoryWidget::updateHistoryGeometry(
 			|| readyToForward()
 			|| _previewDrawPreview
 			|| _suggestOptions) {
-			newScrollHeight -= st::historyReplyHeight;
+			composeAreaHeight += st::historyReplyHeight;
 		}
 		if (_kbShown) {
 			newScrollHeight -= _kbScroll->height();
 		}
 	}
+
+	// The glass compose floats over the list, the list goes down to the
+	// very bottom and keeps its last messages above the glass instead.
+	refreshGlassComposeMargins();
+	_glassInsetBottom = _glassComposeShown
+		? (composeAreaHeight + _glassBottom)
+		: 0;
+	if (!_glassComposeShown) {
+		newScrollHeight -= composeAreaHeight;
+	}
+	newScrollHeight += _glassInsetTop;
+	if (_list) {
+		_list->setGlassInsets(_glassInsetTop, _glassInsetBottom);
+	}
+	_cornerButtons.setBottomSkip(_glassInsetBottom);
+
 	if (newScrollHeight <= 0) {
 		return;
 	}
@@ -8757,10 +8829,10 @@ void HistoryWidget::updateHistoryGeometry(
 	}
 	if (needResize || initial) {
 		if (_autocomplete) {
-			_autocomplete->setBoundings(_scroll->geometry());
+			_autocomplete->setBoundings(scrollVisibleGeometry());
 		}
 		if (_supportAutocomplete) {
-			_supportAutocomplete->setBoundings(_scroll->geometry());
+			_supportAutocomplete->setBoundings(scrollVisibleGeometry());
 		}
 		_cornerButtons.updatePositions();
 		controller()->floatPlayerAreaUpdated();
@@ -11481,12 +11553,214 @@ void HistoryWidget::updateField() {
 		return;
 	}
 	_repaintFieldScheduled = true;
+	if (_glassComposeShown && _composeGlass && !_composeGlass->isHidden()) {
+		_composeGlass->update();
+		return;
+	}
 	const auto fieldAreaTop = _scroll->y() + _scroll->height();
 	rtlupdate(0, fieldAreaTop, width(), height() - fieldAreaTop);
 }
 
+void HistoryWidget::setupLiquidGlass() {
+	if (!Ui::LiquidGlass::Enabled()) {
+		return;
+	}
+	_composeGlassSurface = std::make_unique<Ui::LiquidGlass::Surface>();
+	const auto refreshStyle = [=] {
+		_composeGlassSurface->setStyle(Ui::LiquidGlass::MakeStyle(
+			st::historyComposeAreaBg->c,
+			st::historyGlassComposeRadius));
+	};
+	refreshStyle();
+	style::PaletteChanged(
+	) | rpl::on_next([=] {
+		refreshStyle();
+		if (_composeGlass) {
+			_composeGlass->update();
+		}
+	}, lifetime());
+
+	_composeGlass = Ui::CreateChild<Ui::RpWidget>(this);
+	_composeGlass->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_composeGlass->paintRequest(
+	) | rpl::on_next([=](QRect clip) {
+		auto p = Painter(_composeGlass);
+		paintComposeGlass(p, clip);
+	}, _composeGlass->lifetime());
+	_composeGlass->hide();
+
+	// The capsule takes the mouse from the list under it. It ignores the
+	// events, so they go to us, as if the compose area was ours like before.
+	_composeGlassCatcher = Ui::CreateChild<Ui::RpWidget>(this);
+	_composeGlassCatcher->setMouseTracking(true);
+	_composeGlassCatcher->events(
+	) | rpl::filter([=](not_null<QEvent*> e) {
+		return (e->type() == QEvent::Leave);
+	}) | rpl::on_next([=] {
+		if (hasMouseTracking()) {
+			clearOverStates();
+		}
+	}, _composeGlassCatcher->lifetime());
+	_composeGlassCatcher->hide();
+
+	_composeGlassCatcher->lower();
+	_composeGlass->lower();
+	_scroll->lower();
+
+	_topBar->setGlassBackdrop([=](QRect rect) {
+		const auto shift = _topBar->pos();
+		auto result = grabGlassBackdrop(rect.translated(shift));
+		result.rect.translate(-shift);
+		return result;
+	});
+}
+
+bool HistoryWidget::computeGlassComposeActive() const {
+	if (!_composeGlass || !_history || _kbShown || isChoosingTheme()) {
+		return false;
+	} else if (!editingMessage()
+		&& (isSearching()
+			|| isBlocked()
+			|| isBotStart()
+			|| isJoinChannel()
+			|| isMuteUnmute()
+			|| isReportMessages())) {
+		return false;
+	}
+	return editingMessage() || _canSendMessages;
+}
+
+bool HistoryWidget::computeGlassTopActive() const {
+	// Forum topic tabs live in the same area, keep the classic layout.
+	return _composeGlass && _history && !_subsectionTabs;
+}
+
+void HistoryWidget::refreshGlassComposeMargins() {
+	_glassComposeShown = computeGlassComposeActive();
+	_glassSide = _glassComposeShown ? st::historyGlassComposeSide : 0;
+	_glassBottom = _glassComposeShown ? st::historyGlassComposeBottom : 0;
+}
+
+QRect HistoryWidget::scrollVisibleGeometry() const {
+	return _scroll->geometry().marginsRemoved(
+		{ 0, _glassInsetTop, 0, _glassInsetBottom });
+}
+
+QRect HistoryWidget::composeGlassShape() const {
+	const auto bottom = height() - _glassBottom;
+	auto top = _field->y() - st::historySendPadding;
+	if (_editMsgId
+		|| _replyTo
+		|| readyToForward()
+		|| _kbReplyTo
+		|| _previewDrawPreview
+		|| _suggestOptions) {
+		top -= st::historyReplyHeight;
+	}
+	return QRect(_glassSide, top, width() - 2 * _glassSide, bottom - top);
+}
+
+void HistoryWidget::updateComposeGlassGeometry() {
+	if (!_composeGlass) {
+		return;
+	}
+	const auto shown = _glassComposeShown
+		&& _list
+		&& !isSearching()
+		&& (fieldOrDisabledShown() || isRecording());
+	if (!shown) {
+		_composeGlass->hide();
+		_composeGlassCatcher->hide();
+		return;
+	}
+	const auto shape = composeGlassShape();
+	if (_composeGlassCatcher->geometry() != shape) {
+		_composeGlassCatcher->setGeometry(shape);
+	}
+	if (_composeGlassCatcher->isHidden()) {
+		_composeGlassCatcher->show();
+	}
+	const auto &style = _composeGlassSurface->style();
+	const auto shadow = style.shadowBlur * 2;
+	const auto top = std::max(shape.y() - shadow, 0);
+	const auto geometry = QRect(0, top, width(), height() - top);
+	if (_composeGlass->geometry() != geometry) {
+		_composeGlass->setGeometry(geometry);
+	} else {
+		_composeGlass->update();
+	}
+	if (_composeGlass->isHidden()) {
+		_composeGlass->show();
+	}
+}
+
+void HistoryWidget::paintComposeGlass(Painter &p, QRect clip) {
+	if (!_list || !_glassComposeShown) {
+		return;
+	}
+	const auto origin = _composeGlass->pos();
+	const auto shape = composeGlassShape();
+	const auto margin = _composeGlassSurface->backdropMargin();
+	const auto backdrop = grabGlassBackdrop(
+		shape.marginsAdded({ margin, margin, margin, margin }));
+
+	p.translate(-origin);
+	_composeGlassSurface->paint(p, shape, backdrop);
+	if (_list && !isSearching()) {
+		drawField(p, clip.translated(origin));
+	}
+	p.translate(origin);
+}
+
+Ui::LiquidGlass::Backdrop HistoryWidget::grabGlassBackdrop(QRect rect) {
+	rect = rect.intersected(this->rect());
+	if (rect.isEmpty()) {
+		return {};
+	}
+	// Device pixel ratio 1 is enough, the backdrop is blurred anyway.
+	auto result = Ui::LiquidGlass::Backdrop{
+		.image = QImage(rect.size(), QImage::Format_ARGB32_Premultiplied),
+		.rect = rect,
+	};
+	result.image.fill(st::windowBg->c);
+	{
+		auto p = QPainter(&result.image);
+		const auto content = controller()->content();
+		const auto fromy = content->backgroundFromY();
+		p.translate(-rect.x(), fromy - rect.y());
+		Window::SectionWidget::PaintBackground(
+			p,
+			controller()->currentChatTheme(),
+			QSize(width(), content->height()),
+			rect.translated(0, -fromy),
+			controller()->isGifPausedAtLeastFor(
+				Window::GifPauseReason::Any));
+		p.resetTransform();
+
+		if (_list && !_list->isHidden() && !_scroll->isHidden()) {
+			const auto origin = _list->mapTo(this, QPoint());
+			const auto source = rect.translated(-origin).intersected(
+				_list->rect());
+			if (!source.isEmpty()) {
+				_list->renderGlassBackdrop(
+					p,
+					source.topLeft() + origin - rect.topLeft(),
+					source);
+			}
+		}
+	}
+	return result;
+}
+
 void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 	_repaintFieldScheduled = false;
+
+	// In the glass capsule everything is inset from the sides.
+	const auto areaWidth = width() - 2 * _glassSide;
+	p.translate(_glassSide, 0);
+	const auto restoreTranslation = gsl::finally([&] {
+		p.translate(-_glassSide, 0);
+	});
 
 	auto backy = _field->y() - st::historySendPadding;
 	auto backh = fieldHeight() + 2 * st::historySendPadding;
@@ -11503,7 +11777,9 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 	}
 	p.setInactive(
 		controller()->isGifPausedAtLeastFor(Window::GifPauseReason::Any));
-	p.fillRect(myrtlrect(0, backy, width(), backh), st::historyReplyBg);
+	if (!_glassComposeShown) {
+		p.fillRect(myrtlrect(0, backy, areaWidth, backh), st::historyReplyBg);
+	}
 
 	const auto media = (!_previewDrawPreview && drawMsgText)
 		? drawMsgText->media()
@@ -11543,7 +11819,7 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 		st::historyLinkIcon.paint(
 			p,
 			st::historyReplyIconPosition + QPoint(0, backy),
-			width());
+			areaWidth);
 		const auto textTop = backy + st::msgReplyPadding.top();
 		auto previewLeft = st::historyReplySkip;
 
@@ -11556,7 +11832,7 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 			previewLeft += st::historyReplyPreview + st::msgReplyBarSkip;
 		}
 		p.setPen(st::historyReplyNameFg);
-		const auto elidedWidth = width()
+		const auto elidedWidth = areaWidth
 			- previewLeft
 			- _fieldBarCancel->width()
 			- st::msgReplyPadding.right();
@@ -11578,7 +11854,7 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 		const auto pausedSpoiler = paused || On(PowerSaving::kChatSpoiler);
 		auto replyLeft = st::historyReplySkip;
 		if (_suggestOptions) {
-			_suggestOptions->paintIcon(p, 0, backy, width());
+			_suggestOptions->paintIcon(p, 0, backy, areaWidth);
 		} else {
 			const auto quoted = _replyTo
 				&& !HistoryView::Reply::ComposePreviewQuote(_replyTo).empty();
@@ -11589,7 +11865,7 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 				: st::historyReplyIcon).paint(
 					p,
 					st::historyReplyIconPosition + QPoint(0, backy),
-					width());
+					areaWidth);
 		}
 		if (drawMsgText) {
 			if (hasPreview) {
@@ -11630,7 +11906,7 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 				replyLeft += st::historyReplyPreview + st::msgReplyBarSkip;
 			}
 			if (_suggestOptions) {
-				_suggestOptions->paintLines(p, replyLeft, backy, width());
+				_suggestOptions->paintLines(p, replyLeft, backy, areaWidth);
 			} else {
 				p.setPen(st::historyReplyNameFg);
 				if (_editMsgId) {
@@ -11640,7 +11916,7 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 						p,
 						replyLeft,
 						backy + st::msgReplyPadding.top(),
-						width()
+						areaWidth
 							- replyLeft
 							- _fieldBarCancel->width()
 							- st::msgReplyPadding.right());
@@ -11652,7 +11928,7 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 						st::msgReplyPadding.top()
 							+ st::msgServiceNameFont->height
 							+ backy),
-					.availableWidth = width()
+					.availableWidth = areaWidth
 						- replyLeft
 						- _fieldBarCancel->width()
 						- st::msgReplyPadding.right(),
@@ -11674,7 +11950,7 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 					+ st::msgDateFont->ascent,
 				st::msgDateFont->elided(
 					tr::lng_profile_loading(tr::now),
-					width()
+					areaWidth
 						- replyLeft
 						- _fieldBarCancel->width()
 						- st::msgReplyPadding.right()));
@@ -11682,15 +11958,15 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 	} else if (hasForward) {
 		st::historyForwardIcon.paint(
 			p,
-			st::historyReplyIconPosition + QPoint(0, backy), width());
+			st::historyReplyIconPosition + QPoint(0, backy), areaWidth);
 		const auto x = st::historyReplySkip;
-		const auto available = width()
+		const auto available = areaWidth
 			- x
 			- _fieldBarCancel->width()
 			- st::msgReplyPadding.right();
-		_forwardPanel->paint(p, x, backy, available, width());
+		_forwardPanel->paint(p, x, backy, available, areaWidth);
 	} else if (_suggestOptions) {
-		_suggestOptions->paintBar(p, 0, backy, width());
+		_suggestOptions->paintBar(p, 0, backy, areaWidth);
 	}
 }
 
@@ -11786,7 +12062,9 @@ void HistoryWidget::paintEvent(QPaintEvent *e) {
 
 	Painter p(this);
 	const auto clip = e->rect();
-	if (_list) {
+	if (_list && _glassComposeShown) {
+		// Painted on the glass plate, see paintComposeGlass().
+	} else if (_list) {
 		const auto restrictionHidden = fieldOrDisabledShown()
 			|| isRecording();
 		if (restrictionHidden

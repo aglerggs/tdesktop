@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/ui_utility.h"
+#include "ui/effects/liquid_glass.h"
 #include "window/window_connecting_widget.h"
 #include "window/window_top_bar_wrap.h"
 #include "window/notifications_manager.h"
@@ -1683,6 +1684,10 @@ void MainWidget::showHistory(
 	auto animationParams = animatedShow()
 		? prepareHistoryAnimation(peerId)
 		: Window::SectionSlideParams();
+	auto chatSwitchFadeCache = (!animationParams
+		&& chatSwitchFadeAllowed(peerId, params))
+		? Ui::GrabWidget(_history.get())
+		: QPixmap();
 
 	if (!back && (way != Way::ClearStack)) {
 		// This may modify the current section, for example remove its contents.
@@ -1744,6 +1749,9 @@ void MainWidget::showHistory(
 				crl::on_main(this, [=] {
 					_controller->widget()->setInnerFocus();
 				});
+				if (!chatSwitchFadeCache.isNull()) {
+					startChatSwitchFade(std::move(chatSwitchFadeCache));
+				}
 			}
 		}
 	}
@@ -2007,6 +2015,66 @@ Window::SectionSlideParams MainWidget::prepareMainSectionAnimation(
 		Window::SectionWidget *section,
 		bool fromBottom) {
 	return prepareShowAnimation(section->hasTopBarShadow(), fromBottom);
+}
+
+bool MainWidget::chatSwitchFadeAllowed(
+		PeerId peerId,
+		const SectionShow &params) const {
+	if (!Ui::LiquidGlass::Enabled()
+		|| anim::Disabled()
+		|| (params.animated == anim::type::instant)
+		|| isOneColumn()
+		|| _showAnimation
+		|| _mainSection
+		|| Core::App().passcodeLocked()
+		|| !peerId
+		|| _history->isHidden()
+		|| !_history->peer()
+		|| (_history->peer()->id == peerId)
+		|| (_history->width() <= 0)
+		|| (_history->height() <= 0)) {
+		return false;
+	}
+	return true;
+}
+
+void MainWidget::startChatSwitchFade(QPixmap cache) {
+	constexpr auto kDuration = crl::time(220);
+
+	_chatSwitchFade = base::make_unique_q<Ui::RpWidget>(this);
+	const auto raw = _chatSwitchFade.get();
+	raw->setAttribute(Qt::WA_TransparentForMouseEvents);
+	raw->setGeometry(_history->geometry());
+
+	const auto animation = raw->lifetime().make_state<
+		Ui::Animations::Simple>();
+	raw->paintRequest(
+	) | rpl::on_next([=] {
+		const auto progress = animation->value(1.);
+		if (progress >= 1.) {
+			return;
+		}
+		// The old chat dissolves and drifts up a little,
+		// the new one is already in place below it.
+		auto p = QPainter(raw);
+		p.setOpacity(1. - progress);
+		const auto shift = int(base::SafeRound(
+			progress * st::lineWidth * 12));
+		p.drawPixmap(0, -shift, cache);
+	}, raw->lifetime());
+	raw->show();
+	raw->raise();
+
+	animation->start([=] {
+		raw->update();
+		if (!animation->animating()) {
+			crl::on_main(this, [=] {
+				if (_chatSwitchFade.get() == raw) {
+					_chatSwitchFade = nullptr;
+				}
+			});
+		}
+	}, 0., 1., kDuration, anim::easeOutCubic);
 }
 
 Window::SectionSlideParams MainWidget::prepareHistoryAnimation(PeerId historyPeerId) {
