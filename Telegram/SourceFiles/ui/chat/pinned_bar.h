@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/wrap/slide_wrap.h"
 #include "base/object_ptr.h"
+#include "ui/effects/liquid_glass.h"
 
 namespace Ui {
 
@@ -35,6 +36,10 @@ public:
 	void finishAnimating();
 
 	void setShadowGeometryPostprocess(Fn<QRect(QRect)> postprocess);
+
+	// Liquid glass: a floating glass capsule over what the provider
+	// gives, the rect is passed and returned in global coordinates.
+	void setGlassBackdrop(Ui::LiquidGlass::BackdropProvider provider);
 
 	void setContent(rpl::producer<Ui::MessageBarContent> content);
 	void setRightButton(object_ptr<Ui::RpWidget> button);
@@ -73,6 +78,9 @@ private:
 	Fn<QRect(QRect)> _shadowGeometryPostprocess;
 	bool _shouldBeShown = false;
 	bool _forceHidden = false;
+
+	Ui::LiquidGlass::BackdropProvider _glassBackdrop;
+	std::unique_ptr<Ui::LiquidGlass::Surface> _glass;
 
 	rpl::lifetime _contentLifetime;
 

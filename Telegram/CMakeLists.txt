@@ -813,6 +813,8 @@ PRIVATE
     data/data_search_controller.h
     data/data_send_action.cpp
     data/data_send_action.h
+    data/data_saved_deleted.cpp
+    data/data_saved_deleted.h
     data/data_session.cpp
     data/data_session.h
     data/data_shared_media.cpp

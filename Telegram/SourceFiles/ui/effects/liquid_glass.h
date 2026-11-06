@@ -11,8 +11,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Ui::LiquidGlass {
 
-// Global switch. Set TDESKTOP_NO_LIQUID_GLASS=1 to get the classic look.
+// Global switch, fixed for the whole run: the glass is on if it was
+// enabled in the settings at the start and TDESKTOP_NO_LIQUID_GLASS
+// environment variable is not set.
 [[nodiscard]] bool Enabled();
+
+struct Settings {
+	bool enabled = true; // Applied after a restart.
+	float64 blur = 1.; // Blur radius multiplier, applied at once.
+	float64 tint = 1.; // Tint strength multiplier, applied at once.
+};
+inline constexpr auto kMinBlur = 0.25;
+inline constexpr auto kMaxBlur = 2.;
+inline constexpr auto kMinTint = 0.2;
+inline constexpr auto kMaxTint = 1.8;
+
+// Reads the settings file, call once at the start before any widget.
+void LoadSettings(const QString &path);
+[[nodiscard]] const Settings &CurrentSettings();
+void SetSettings(Settings settings);
+[[nodiscard]] rpl::producer<> SettingsChanged();
 
 struct Style {
 	// Corner radius of the glass shape, logical pixels.

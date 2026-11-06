@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/chat_filters_tabs_slider.h"
 
 #include "ui/effects/ripple_animation.h"
+#include "ui/effects/liquid_glass.h"
+#include "ui/painter.h"
 #include "ui/widgets/side_bar_button.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_widgets.h"
@@ -237,6 +239,105 @@ QImage ChatsFiltersTabs::cacheUnreadCount(int count, bool muted) const {
 	return image;
 }
 
+QRectF ChatsFiltersTabs::liquidTargetRect(int index) const {
+	if (index < 0 || index >= int(_sections.size())) {
+		return QRectF();
+	}
+	const auto &shifted = _sections[index];
+	const auto &section = *shifted.section;
+	const auto left = section.left
+		+ shifted.horizontalShift
+		+ (section.width - section.contentWidth) / 2;
+	const auto font = _st.labelStyle.font->height;
+	const auto padding = QMarginsF(
+		font * 0.75,
+		font * 0.4,
+		font * 0.75,
+		font * 0.4);
+	return QRectF(
+		left,
+		_st.labelTop,
+		section.contentWidth,
+		font).marginsAdded(padding);
+}
+
+void ChatsFiltersTabs::paintLiquidSelection(QPainter &p, int activeIndex) {
+	const auto target = liquidTargetRect(activeIndex);
+	if (target.isEmpty()) {
+		return;
+	}
+	constexpr auto kLeadingDuration = crl::time(220);
+	constexpr auto kTrailingDuration = crl::time(420);
+	if (activeIndex != _liquidIndex) {
+		const auto first = (_liquidIndex < 0) || _liquidShown.isEmpty();
+		_liquidIndex = activeIndex;
+		if (first || anim::Disabled()) {
+			_liquidFrom = target;
+			_liquidLeading.stop();
+			_liquidTrailing.stop();
+		} else {
+			_liquidFrom = _liquidShown;
+			_liquidRightLeads = (target.center().x() > _liquidFrom.center().x());
+			const auto callback = [=] { update(); };
+			_liquidLeading.start(callback, 0., 1., kLeadingDuration);
+			_liquidTrailing.start(callback, 0., 1., kTrailingDuration);
+		}
+	}
+	const auto easeOut = [](float64 t) {
+		const auto u = 1. - t;
+		return 1. - u * u * u;
+	};
+	const auto easeOutBack = [](float64 t) {
+		// A little overshoot, the drop wobbles before it settles.
+		constexpr auto c1 = 1.25;
+		constexpr auto c3 = c1 + 1.;
+		const auto u = t - 1.;
+		return 1. + c3 * u * u * u + c1 * u * u;
+	};
+	const auto leading = easeOut(_liquidLeading.value(1.));
+	const auto trailing = easeOutBack(_liquidTrailing.value(1.));
+	const auto mix = [](float64 from, float64 to, float64 progress) {
+		return from + (to - from) * progress;
+	};
+	auto left = mix(
+		_liquidFrom.left(),
+		target.left(),
+		_liquidRightLeads ? trailing : leading);
+	auto right = mix(
+		_liquidFrom.right(),
+		target.right(),
+		_liquidRightLeads ? leading : trailing);
+	if (right - left < target.height()) {
+		const auto center = (left + right) / 2.;
+		left = center - target.height() / 2.;
+		right = center + target.height() / 2.;
+	}
+	// Stretched while flowing, so a bit thinner, like a drop.
+	const auto stretch = (right - left) / std::max(target.width(), 1.);
+	const auto squeeze = 1. - 0.18 * std::clamp(stretch - 1., 0., 1.);
+	const auto height = target.height() * squeeze;
+	const auto rect = QRectF(
+		left,
+		target.center().y() - height / 2.,
+		right - left,
+		height);
+	_liquidShown = rect;
+
+	auto fill = _st.barFgActive->c;
+	fill.setAlphaF(0.16);
+	auto hq = PainterHighQualityEnabler(p);
+	p.setPen(Qt::NoPen);
+	p.setBrush(fill);
+	const auto radius = rect.height() / 2.;
+	p.drawRoundedRect(rect, radius, radius);
+	Ui::LiquidGlass::PaintShine(
+		p,
+		rect,
+		radius,
+		false,
+		(st::windowBg->c.lightnessF() < 0.5));
+}
+
 void ChatsFiltersTabs::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 
@@ -244,6 +345,10 @@ void ChatsFiltersTabs::paintEvent(QPaintEvent *e) {
 	const auto range = getCurrentActiveRange();
 	const auto activeIndex = activeSection();
 	const auto now = crl::now();
+	const auto liquid = Ui::LiquidGlass::Enabled() && !_reordering;
+	if (liquid) {
+		paintLiquidSelection(p, activeIndex);
+	}
 
 	auto index = 0;
 	auto raisedIndex = -1;
@@ -351,7 +456,7 @@ void ChatsFiltersTabs::paintEvent(QPaintEvent *e) {
 		index = raisedIndex;
 		drawSection(*_sections[raisedIndex].section);
 	}
-	if (_st.barSnapToLabel) {
+	if (_st.barSnapToLabel && !liquid) {
 		const auto drawRect = [&](QRect rect, bool active) {
 			const auto &bar = active ? _barActive : _bar;
 			if (bar) {

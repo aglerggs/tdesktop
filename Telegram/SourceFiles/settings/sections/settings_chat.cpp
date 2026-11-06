@@ -61,6 +61,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "ui/effects/liquid_glass.h"
+#include "data/data_saved_deleted.h"
+#include "ui/widgets/continuous_sliders.h"
+
+#include <QtWidgets/QApplication>
 #include "data/data_session.h"
 #include "data/data_cloud_themes.h"
 #include "data/data_file_origin.h"
@@ -759,6 +764,187 @@ void BuildThemeOptionsSection(SectionBuilder &builder) {
 	}
 }
 
+void SetupLiquidGlass(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
+	using namespace Ui::LiquidGlass;
+
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+	Ui::AddSubsectionTitle(container, rpl::single(u"Liquid Glass"_q));
+
+	const auto enabled = container->add(
+		object_ptr<Ui::Checkbox>(
+			container,
+			u"Стеклянный интерфейс"_q,
+			CurrentSettings().enabled,
+			st::settingsCheckbox),
+		st::settingsCheckboxPadding);
+	enabled->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		auto settings = CurrentSettings();
+		if (settings.enabled == checked) {
+			return;
+		}
+		settings.enabled = checked;
+		SetSettings(settings);
+		controller->show(Ui::MakeConfirmBox({
+			.text = tr::lng_settings_need_restart(),
+			.confirmed = [] { Core::Restart(); },
+			.confirmText = tr::lng_settings_restart_now(),
+			.cancelText = tr::lng_settings_restart_later(),
+		}));
+	}, enabled->lifetime());
+
+	const auto repaintAll = [] {
+		for (const auto widget : QApplication::topLevelWidgets()) {
+			widget->update();
+		}
+	};
+	const auto addSlider = [&](
+			const QString &title,
+			float64 min,
+			float64 max,
+			float64 current,
+			bool inverted,
+			Fn<void(float64)> apply) {
+		Ui::AddSkip(container);
+		container->add(
+			object_ptr<Ui::FlatLabel>(
+				container,
+				title,
+				st::settingsScaleLabel),
+			st::settingsCheckboxPadding);
+		auto sliderWithLabel = MakeSliderWithLabel(
+			container,
+			st::settingsScale,
+			st::settingsScaleLabel,
+			st::normalFont->spacew * 2,
+			st::settingsScaleLabel.style.font->width(u"100%"_q),
+			true);
+		container->add(
+			std::move(sliderWithLabel.widget),
+			st::settingsBigScalePadding);
+		const auto slider = sliderWithLabel.slider;
+		const auto label = sliderWithLabel.label;
+		const auto toValue = [=](float64 position) {
+			const auto progress = inverted ? (1. - position) : position;
+			return min + (max - min) * progress;
+		};
+		const auto toPosition = [=](float64 value) {
+			const auto progress = (value - min) / (max - min);
+			return std::clamp(inverted ? (1. - progress) : progress, 0., 1.);
+		};
+		const auto updateLabel = [=](float64 position) {
+			label->setText(QString::number(
+				int(base::SafeRound(position * 100))) + '%');
+		};
+		slider->setValue(toPosition(current));
+		updateLabel(toPosition(current));
+		slider->setPseudoDiscrete(
+			101,
+			[](int index) { return index; },
+			int(base::SafeRound(toPosition(current) * 100)),
+			[=](int index) {
+				const auto position = index / 100.;
+				updateLabel(position);
+				apply(toValue(position));
+				repaintAll();
+			});
+	};
+	const auto themes = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		st::settingsCheckboxPadding);
+	const auto addTheme = [&](const QString &title, const QString &path) {
+		const auto button = Ui::CreateChild<Ui::RoundButton>(
+			themes,
+			rpl::single(title),
+			st::defaultLightButton);
+		button->setClickedCallback([=] {
+			if (Window::Theme::Apply(path)) {
+				Window::Theme::KeepApplied();
+			}
+		});
+		return button;
+	};
+	const auto day = addTheme(
+		u"Тема Liquid Day"_q,
+		u":/gui/liquid-day.tdesktop-theme"_q);
+	const auto night = addTheme(
+		u"Тема Liquid Night"_q,
+		u":/gui/liquid-night.tdesktop-theme"_q);
+	themes->resize(themes->width(), day->height());
+	themes->widthValue() | rpl::on_next([=](int width) {
+		day->moveToLeft(0, 0);
+		night->moveToLeft(day->width() + st::normalFont->spacew * 2, 0);
+	}, themes->lifetime());
+
+	addSlider(
+		u"Размытие"_q,
+		kMinBlur,
+		kMaxBlur,
+		CurrentSettings().blur,
+		false,
+		[](float64 value) {
+			auto settings = CurrentSettings();
+			settings.blur = value;
+			SetSettings(settings);
+		});
+	addSlider(
+		u"Прозрачность"_q,
+		kMinTint,
+		kMaxTint,
+		CurrentSettings().tint,
+		true,
+		[](float64 value) {
+			auto settings = CurrentSettings();
+			settings.tint = value;
+			SetSettings(settings);
+		});
+
+	Ui::AddSkip(container);
+	const auto keepDeleted = container->add(
+		object_ptr<Ui::Checkbox>(
+			container,
+			u"Сохранять удалённые сообщения и историю правок"_q,
+			Data::SavedDeleted::Enabled(),
+			st::settingsCheckbox),
+		st::settingsCheckboxPadding);
+	keepDeleted->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		Data::SavedDeleted::SetEnabled(checked);
+	}, keepDeleted->lifetime());
+	Ui::AddDividerText(
+		container,
+		rpl::single(u"Удалённые собеседниками сообщения остаются в чате "
+			"с пометкой, после перезапуска — в меню чата «Удалённые "
+			"сообщения». Хранятся только на этом компьютере, в папке "
+			"tdata, без шифрования. Сообщения с таймером и «на один "
+			"просмотр» не сохраняются."_q));
+	Ui::AddSkip(container);
+}
+
+void BuildLiquidGlassSection(SectionBuilder &builder) {
+	const auto controller = builder.controller();
+
+	builder.add([controller](const WidgetContext &ctx) {
+		SetupLiquidGlass(controller, ctx.container.get());
+		return SectionBuilder::WidgetToAdd{};
+	}, [] {
+		return SearchEntry{
+			.id = u"chat/liquid-glass"_q,
+			.title = u"Liquid Glass"_q,
+			.keywords = {
+				u"glass"_q,
+				u"liquid"_q,
+				u"стекло"_q,
+				u"размытие"_q,
+				u"прозрачность"_q,
+			},
+		};
+	});
+}
+
 void BuildThemeSettingsSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 
@@ -1225,6 +1411,7 @@ void BuildSupportSection(SectionBuilder &builder) {
 
 void BuildChatSectionContent(SectionBuilder &builder) {
 	BuildThemeOptionsSection(builder);
+	BuildLiquidGlassSection(builder);
 	BuildThemeSettingsSection(builder);
 	BuildCloudThemesSection(builder);
 	BuildChatBackgroundSection(builder);

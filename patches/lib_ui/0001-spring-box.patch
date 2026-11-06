@@ -1,0 +1,38 @@
+diff --git a/ui/layers/layer_widget.cpp b/ui/layers/layer_widget.cpp
+index f8b1aa6..cde7d6a 100644
+--- a/ui/layers/layer_widget.cpp
++++ b/ui/layers/layer_widget.cpp
+@@ -6,6 +6,8 @@
+ //
+ #include "ui/layers/layer_widget.h"
+ 
++#include <cmath>
++
+ #include "ui/cached_special_layer_shadow_corners.h"
+ #include "ui/layers/box_layer_widget.h"
+ #include "ui/widgets/shadow.h"
+@@ -329,7 +331,23 @@ void LayerStackWidget::BackgroundWidget::paintEvent(QPaintEvent *e) {
+ 	}
+ 	if (!_layerCache.isNull() && layerOpacity > 0) {
+ 		p.setOpacity(layerOpacity);
+-		p.drawPixmapLeft(layerBox.topLeft() - QPoint(st::boxRoundShadow.extend.left(), st::boxRoundShadow.extend.top()), width(), _layerCache);
++		const auto topLeft = layerBox.topLeft() - QPoint(st::boxRoundShadow.extend.left(), st::boxRoundShadow.extend.top());
++		if (_layerShown && _a_layerShown.animating()) {
++			// Liquid glass fork: the box springs in, 92% -> ~101% -> 100%.
++			const auto t = std::clamp(layerOpacity, 0., 1.);
++			const auto scale = 1. - 0.08 * std::exp(-5. * t) * std::cos(9. * t);
++			const auto size = QSizeF(_layerCache.size()) / _layerCache.devicePixelRatio();
++			const auto center = QPointF(rtl() ? (width() - topLeft.x() - size.width()) : topLeft.x(), topLeft.y()) + QPointF(size.width() / 2., size.height() / 2.);
++			p.save();
++			p.setRenderHint(QPainter::SmoothPixmapTransform);
++			p.translate(center);
++			p.scale(scale, scale);
++			p.translate(-center);
++			p.drawPixmapLeft(topLeft, width(), _layerCache);
++			p.restore();
++		} else {
++			p.drawPixmapLeft(topLeft, width(), _layerCache);
++		}
+ 	}
+ 	if (!_mainMenuCache.isNull() && mainMenuRight > 0) {
+ 		p.setOpacity(1.);
