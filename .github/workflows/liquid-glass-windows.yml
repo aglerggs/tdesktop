@@ -200,6 +200,28 @@ jobs:
           echo "LIBS_BEFORE=$(state libs)" >> $GITHUB_ENV
           echo "QT_BEFORE=$(state qt)" >> $GITHUB_ENV
 
+      - name: Repair libraries pruned by older runs.
+        # The prune below used to delete the generated wallet_engine.cpp and
+        # the Rust sources, while their stage keys stayed. Drop such keys so
+        # prepare rebuilds those stages.
+        shell: bash
+        run: |
+          keys="$LibrariesPath/cache_keys"
+          [ -d "$keys" ] || exit 0
+          if [ ! -f "$LibrariesPath/tdesktop_rust/out/src/wallet_engine/wallet_engine.cpp" ]; then
+            echo "tdesktop_rust output is incomplete, rebuilding it."
+            rm -f "$keys"/tdesktop_rust*
+          fi
+          for d in wallet-engine tlottie; do
+            if [ -z "$(find "$LibrariesPath/$d" -name '*.rs' -print -quit 2>/dev/null)" ]; then
+              echo "$d sources are missing, cloning them again."
+              rm -rf "$LibrariesPath/$d"
+              rm -f "$keys"/$d*
+              rm -f "$keys"/tdesktop_rust*
+            fi
+          done
+          ls "$keys"
+
       - name: Make room on the system disk.
         # Qt alone needs tens of gigabytes while building; drop the runner
         # tools we never use so it does not run out of space.
@@ -235,7 +257,7 @@ jobs:
       - name: Free up some disk space.
         if: always()
         shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete || true
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' -o -path '*/tdesktop_rust/out/*' -o -path '*/wallet-engine/*' -o -path '*/tlottie/*' ')' -type f ')' -o -empty ')' -delete || true
 
       - name: Check the libraries state.
         if: always()
