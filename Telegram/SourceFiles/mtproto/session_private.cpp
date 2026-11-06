@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_response.h"
 #include "mtproto/mtproto_dc_options.h"
 #include "mtproto/connection_abstract.h"
+#include "mtproto/details/mtproto_websocket_socket.h"
 #include "base/random.h"
 #include "base/qthelp_url.h"
 #include "base/openssl_help.h"
@@ -149,9 +150,21 @@ base::options::toggle OptionPreferIPv6({
 	.description = "Prefer IPv6 if it is available. Require \"Try connecting through IPv6\" to be enabled",
 });
 
+// Built-in tg-ws-proxy: try MTProto over WebSocket to the web endpoints
+// together with the usual connections, use it when it works.
+base::options::toggle OptionWebSocketTransport({
+	.id = kOptionWebSocketTransport,
+	.name = "Connect through WebSocket",
+	.description = "Also try connecting to Telegram the way the web version "
+		"does (WebSocket over HTTPS, like tg-ws-proxy) and prefer it "
+		"when it works. Only without a proxy.",
+	.defaultValue = true,
+});
+
 } // namespace
 
 const char kOptionPreferIPv6[] = "prefer-ipv6";
+const char kOptionWebSocketTransport[] = "websocket-transport";
 
 SessionPrivate::SessionPrivate(
 	not_null<Instance*> instance,
@@ -197,12 +210,17 @@ void SessionPrivate::appendTestConnection(
 		DcOptions::Variants::Protocol protocol,
 		const QString &ip,
 		int port,
-		const bytes::vector &protocolSecret) {
+		const bytes::vector &protocolSecret,
+		bool webSocket) {
 	QWriteLocker lock(&_stateMutex);
 
-	const auto priority = (qthelp::is_ipv6(ip) ? (OptionPreferIPv6.value() ? 2 : 0) : 1)
-		+ (protocol == DcOptions::Variants::Tcp ? 1 : 0)
-		+ (protocolSecret.empty() ? 0 : 1);
+	// WebSocket is preferred over everything when it works.
+	constexpr auto kWebSocketPriority = 10;
+	const auto priority = webSocket
+		? kWebSocketPriority
+		: ((qthelp::is_ipv6(ip) ? (OptionPreferIPv6.value() ? 2 : 0) : 1)
+			+ (protocol == DcOptions::Variants::Tcp ? 1 : 0)
+			+ (protocolSecret.empty() ? 0 : 1));
 	_testConnections.push_back({
 		AbstractConnection::Create(
 			_instance,
@@ -213,6 +231,9 @@ void SessionPrivate::appendTestConnection(
 		priority
 	});
 	const auto weak = _testConnections.back().data.get();
+	if (webSocket) {
+		weak->setWebSocketTransport(true);
+	}
 	connect(weak, &AbstractConnection::error, [=](int errorCode) {
 		onError(weak, errorCode);
 	});
@@ -249,6 +270,25 @@ void SessionPrivate::appendTestConnection(
 			protocolDcId,
 			protocolForFiles);
 	});
+}
+
+void SessionPrivate::appendWebSocketConnection() {
+	if (!OptionWebSocketTransport.value()
+		|| (_options->proxy.type != ProxyData::Type::None)
+		|| (_currentDcType == DcType::Cdn)) {
+		return;
+	}
+	const auto address = WebSocketSocket::EndpointAddress(
+		getProtocolDcId());
+	if (address.isEmpty()) {
+		return;
+	}
+	appendTestConnection(
+		DcOptions::Variants::Tcp,
+		address,
+		WebSocketSocket::kPort,
+		{},
+		true);
 }
 
 int16 SessionPrivate::getProtocolDcId() const {
@@ -1072,6 +1112,10 @@ void SessionPrivate::connectToServer(bool afterConfig) {
 						endpoint.secret);
 				}
 			}
+		}
+		if (!_testConnections.empty()) {
+			// Raced with the usual connections, so they are the fallback.
+			appendWebSocketConnection();
 		}
 	}
 	if (_testConnections.empty()) {

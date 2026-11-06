@@ -35,6 +35,7 @@ public:
 		int16 protocolDcId,
 		bool protocolForFiles) override;
 	void timedOut() override;
+	void setWebSocketTransport(bool enabled) override;
 	bool isConnected() const override;
 
 	int32 debugState() const override;
@@ -81,6 +82,7 @@ private:
 	class Protocol;
 	std::unique_ptr<Protocol> _protocol;
 	int16 _protocolDcId = 0;
+	bool _webSocket = false;
 
 	Status _status = Status::Waiting;
 	MTPint128 _checkNonce;

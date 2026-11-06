@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mtproto/details/mtproto_abstract_socket.h"
 #include "mtproto/details/mtproto_web_proxy_socket.h"
+#include "mtproto/details/mtproto_websocket_socket.h"
 #include "base/bytes.h"
 #include "base/openssl_help.h"
 #include "base/random.h"
@@ -257,7 +258,16 @@ TcpConnection::TcpConnection(
 }
 
 ConnectionPointer TcpConnection::clone(const ProxyData &proxy) {
-	return ConnectionPointer::New<TcpConnection>(_instance, thread(), proxy);
+	auto result = ConnectionPointer::New<TcpConnection>(
+		_instance,
+		thread(),
+		proxy);
+	result->setWebSocketTransport(_webSocket);
+	return result;
+}
+
+void TcpConnection::setWebSocketTransport(bool enabled) {
+	_webSocket = enabled;
 }
 
 void TcpConnection::ensureAvailableInBuffer(int amount) {
@@ -532,13 +542,23 @@ void TcpConnection::connectToServer(
 		_port = port;
 		_protocol = Protocol::Create(secret);
 	}
-	_socket = (_proxy.type == ProxyData::Type::Web)
-		? std::make_unique<WebProxySocket>(thread(), _proxy)
-		: AbstractSocket::Create(
+	if (_proxy.type == ProxyData::Type::Web) {
+		_socket = std::make_unique<WebProxySocket>(thread(), _proxy);
+	} else if (_webSocket
+		&& !proxyProtocol
+		&& (_proxy.type == ProxyData::Type::None)) {
+		_socket = std::make_unique<WebSocketSocket>(
+			thread(),
+			protocolDcId,
+			protocolForFiles);
+	} else {
+		_webSocket = false;
+		_socket = AbstractSocket::Create(
 			thread(),
 			secret,
 			ToNetworkProxy(_proxy),
 			protocolForFiles);
+	}
 	_protocolDcId = protocolDcId;
 
 	const auto postfix = _socket->debugPostfix();
@@ -649,6 +669,9 @@ QString TcpConnection::transport() const {
 	if (!isConnected()) {
 		return QString();
 	}
+	if (_webSocket) {
+		return u"WebSocket"_q;
+	}
 	auto result = u"TCP"_q;
 	if (qthelp::is_ipv6(_address)) {
 		result += u"/IPv6"_q;
@@ -657,6 +680,9 @@ QString TcpConnection::transport() const {
 }
 
 QString TcpConnection::tag() const {
+	if (_webSocket) {
+		return u"WebSocket"_q;
+	}
 	auto result = u"TCP"_q;
 	if (qthelp::is_ipv6(_address)) {
 		result += u"/IPv6"_q;

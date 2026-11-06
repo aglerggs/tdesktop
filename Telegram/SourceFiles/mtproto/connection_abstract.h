@@ -90,6 +90,9 @@ public:
 		bool protocolForFiles) = 0;
 	virtual void timedOut() {
 	}
+	// MTProto over WebSocket to the web endpoints, see WebSocketSocket.
+	virtual void setWebSocketTransport(bool enabled) {
+	}
 	[[nodiscard]] virtual bool isConnected() const = 0;
 	[[nodiscard]] virtual bool usingHttpWait() {
 		return false;
