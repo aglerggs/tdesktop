@@ -313,6 +313,15 @@ jobs:
             echo "TDESKTOP_BUILD_API=-D TDESKTOP_API_TEST=ON" >> $GITHUB_ENV
           fi
 
+      - name: Enlarge the page file.
+        # The parallel MSVC build with precompiled headers runs out of
+        # memory on the runner ("compiler is out of heap space").
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "D:"
+
       - name: Telegram Desktop build.
         run: |
           cd %TBUILD%\%REPO_NAME%\Telegram
@@ -326,7 +335,7 @@ jobs:
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
 
-          cmake --build ..\out --config %CONFIGURATION% --parallel
+          cmake --build ..\out --config %CONFIGURATION% --parallel 2 -- /p:CL_MPCount=3
 
       - name: Move artifact.
         run: |
