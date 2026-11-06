@@ -108,27 +108,37 @@ jobs:
       - name: Install ATL for the MSVC toolset.
         # breakpad's dump_syms needs atlbase.h; the runner image ships the
         # 14.44 toolset without ATL, so add it before building libraries.
+        # The installer sometimes hangs, so each try is limited to 12 minutes.
+        timeout-minutes: 40
         shell: pwsh
         run: |
           $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
           $vs = & "$installer\vswhere.exe" -latest -property installationPath
           Write-Host "Visual Studio: $vs"
-          foreach ($c in @(
-              'Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL',
-              'Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL.x86.x64',
-              'Microsoft.VisualStudio.Component.VC.ATL')) {
-            Write-Host "Adding $c"
-            $p = Start-Process "$installer\setup.exe" -Wait -PassThru -ArgumentList @(
-              'modify', '--installPath', "`"$vs`"", '--add', $c,
-              '--quiet', '--norestart', '--nocache')
-            Write-Host "exit code: $($p.ExitCode)"
+          function Test-Atl {
+            [bool](Get-ChildItem "$vs\VC\Tools\MSVC" -Directory |
+              Where-Object { $_.Name -like '14.44*' -and
+                (Test-Path "$($_.FullName)\atlmfc\include\atlbase.h") })
           }
-          $found = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter atlbase.h -ErrorAction SilentlyContinue
-          $found | ForEach-Object { Write-Host $_.FullName }
-          if (-not ($found | Where-Object { $_.FullName -like '*14.44*' })) {
+          for ($try = 1; -not (Test-Atl) -and $try -le 3; $try++) {
+            Write-Host "Installing ATL, try $try"
+            Get-Process -Name setup, vs_installer*, VSIXInstaller -ErrorAction SilentlyContinue | Stop-Process -Force
+            $p = Start-Process "$installer\setup.exe" -PassThru -ArgumentList @(
+              'modify', '--installPath', "`"$vs`"",
+              '--add', 'Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL',
+              '--quiet', '--norestart', '--nocache')
+            if (-not $p.WaitForExit(12 * 60 * 1000)) {
+              Write-Host 'The installer hangs, killing it.'
+              $p | Stop-Process -Force
+            } else {
+              Write-Host "exit code: $($p.ExitCode)"
+            }
+          }
+          if (-not (Test-Atl)) {
             Write-Error 'atlbase.h for the 14.44 toolset was not installed'
             exit 1
           }
+          Write-Host 'ATL is installed.'
 
       - uses: Eden-CI/msvc-dev-cmd@master
         name: Native Tools Command Prompt.
