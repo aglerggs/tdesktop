@@ -83,6 +83,10 @@ private:
 	[[nodiscard]] int badgeExtraWidth(int index) const;
 	void updateSectionsContentWidths();
 
+	// Liquid glass: the selection is a glossy drop flowing between tabs.
+	[[nodiscard]] QRectF liquidTargetRect(int index) const;
+	void paintLiquidSelection(QPainter &p, int activeIndex);
+
 	using Index = int;
 	struct Unread final {
 		QImage cache;
@@ -108,6 +112,13 @@ private:
 	Fn<bool()> _emojiPaused;
 
 	int _reordering = 0;
+
+	int _liquidIndex = -1;
+	QRectF _liquidFrom;
+	QRectF _liquidShown;
+	bool _liquidRightLeads = true;
+	Ui::Animations::Simple _liquidLeading;
+	Ui::Animations::Simple _liquidTrailing;
 
 	rpl::lifetime _paletteLifetime;
 	rpl::event_stream<int> _contextMenuRequested;

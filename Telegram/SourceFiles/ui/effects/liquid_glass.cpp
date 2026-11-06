@@ -11,6 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image_prepare.h"
 #include "ui/painter.h"
 
+#include <QtCore/QFile>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+
 #include <cmath>
 
 namespace Ui::LiquidGlass {
@@ -113,12 +117,66 @@ struct Pixel {
 	return color;
 }
 
+Settings GlobalSettings;
+bool EnabledAtStart = true;
+QString SettingsPath;
+rpl::event_stream<> SettingsUpdates;
+
+[[nodiscard]] Settings Normalized(Settings settings) {
+	settings.blur = std::clamp(settings.blur, kMinBlur, kMaxBlur);
+	settings.tint = std::clamp(settings.tint, kMinTint, kMaxTint);
+	return settings;
+}
+
+void SaveSettings() {
+	if (SettingsPath.isEmpty()) {
+		return;
+	}
+	auto object = QJsonObject();
+	object.insert(u"enabled"_q, GlobalSettings.enabled);
+	object.insert(u"blur"_q, GlobalSettings.blur);
+	object.insert(u"tint"_q, GlobalSettings.tint);
+	auto file = QFile(SettingsPath);
+	if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+		file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+	}
+}
+
 } // namespace
 
 bool Enabled() {
-	static const auto result = !qEnvironmentVariableIsSet(
+	static const auto disabledByEnvironment = qEnvironmentVariableIsSet(
 		"TDESKTOP_NO_LIQUID_GLASS");
-	return result;
+	return !disabledByEnvironment && EnabledAtStart;
+}
+
+void LoadSettings(const QString &path) {
+	SettingsPath = path;
+	auto file = QFile(path);
+	if (file.open(QIODevice::ReadOnly)) {
+		const auto document = QJsonDocument::fromJson(file.readAll());
+		const auto object = document.object();
+		auto loaded = Settings();
+		loaded.enabled = object.value(u"enabled"_q).toBool(true);
+		loaded.blur = object.value(u"blur"_q).toDouble(1.);
+		loaded.tint = object.value(u"tint"_q).toDouble(1.);
+		GlobalSettings = Normalized(loaded);
+	}
+	EnabledAtStart = GlobalSettings.enabled;
+}
+
+const Settings &CurrentSettings() {
+	return GlobalSettings;
+}
+
+void SetSettings(Settings settings) {
+	GlobalSettings = Normalized(settings);
+	SaveSettings();
+	SettingsUpdates.fire({});
+}
+
+rpl::producer<> SettingsChanged() {
+	return SettingsUpdates.events();
 }
 
 Style MakeStyle(const QColor &base, int radius, RectParts rim) {
@@ -281,7 +339,8 @@ const Style &Surface::style() const {
 
 int Surface::backdropMargin() const {
 	// Blur needs its radius around, the rim lensing - its reach.
-	return _st.blur + int(std::ceil(_st.bevel * kRimReach)) + kScale;
+	const auto blur = int(std::ceil(_st.blur * GlobalSettings.blur));
+	return blur + int(std::ceil(_st.bevel * kRimReach)) + kScale;
 }
 
 void Surface::paint(
@@ -366,7 +425,9 @@ void Surface::paintBody(
 			QImage::Format_ARGB32_Premultiplied);
 	}
 	work.setDevicePixelRatio(1.);
-	const auto radius = std::max(_st.blur / kScale, 1);
+	const auto radius = std::max(
+		int(base::SafeRound(_st.blur * GlobalSettings.blur)) / kScale,
+		1);
 	if (work.width() > radius && work.height() > radius) {
 		work = Images::BlurLargeImage(std::move(work), radius);
 	}
@@ -518,7 +579,9 @@ void Surface::paintOverlay(QPainter &p, QRectF shape) const {
 	const auto floating = (_st.rim == RectPart::AllSides);
 	const auto transparent = WithAlphaF(_st.highlight, 0.);
 
-	p.fillPath(path, _st.tint);
+	p.fillPath(
+		path,
+		WithAlphaF(_st.tint, _st.tint.alphaF() * GlobalSettings.tint));
 
 	// Soft shine in the upper half.
 	if (_st.highlight.alpha() > 0 && (floating || (_st.rim & RectPart::Top))) {
