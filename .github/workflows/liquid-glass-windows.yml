@@ -180,6 +180,30 @@ jobs:
           echo "LIBS_BEFORE=$(state libs)" >> $GITHUB_ENV
           echo "QT_BEFORE=$(state qt)" >> $GITHUB_ENV
 
+      - name: Make room on the system disk.
+        # Qt alone needs tens of gigabytes while building; drop the runner
+        # tools we never use so it does not run out of space.
+        shell: pwsh
+        run: |
+          Get-PSDrive C | Format-Table Used,Free
+          foreach ($d in @(
+              'C:\Android', 'C:\ghcup', 'C:\Julia', 'C:\Miniconda',
+              'C:\selenium', 'C:\rtools45', 'C:\mingw64', 'C:\mingw32',
+              'C:\Program Files (x86)\Android', 'C:\Program Files\Android',
+              'C:\Program Files\Azure Cosmos DB Emulator',
+              'C:\Program Files\Microsoft SQL Server',
+              'C:\Program Files\PostgreSQL', 'C:\Program Files\MongoDB',
+              'C:\hostedtoolcache\windows\go', 'C:\hostedtoolcache\windows\Ruby',
+              'C:\hostedtoolcache\windows\PyPy', 'C:\hostedtoolcache\windows\node',
+              'C:\hostedtoolcache\windows\CodeQL')) {
+            if (Test-Path $d) {
+              Write-Host "Removing $d"
+              cmd /c "rmdir /s /q `"$d`"" 2>$null
+            }
+          }
+          docker system prune -a -f 2>$null | Out-Null
+          Get-PSDrive C | Format-Table Used,Free
+
       - name: Libraries.
         id: libraries
         # Leave time to save the progress if the libraries do not fit.
