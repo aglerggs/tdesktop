@@ -972,3 +972,4 @@ restoreWindowsOfferClose: IconButton(dialogsCancelSearchInPeer) {
 // Liquid glass selection in the chats list.
 dialogsGlassPillMargins: margins(6px, 2px, 6px, 2px);
 dialogsGlassPillRadius: 16px;
+dialogsGlassPillNarrowMargins: margins(6px, 3px, 6px, 3px);

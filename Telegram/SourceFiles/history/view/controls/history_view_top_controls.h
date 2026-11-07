@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "ui/effects/liquid_glass.h"
 #include "base/basic_types.h"
 #include "base/required.h"
 #include "core/click_handler_types.h"
@@ -88,6 +89,9 @@ public:
 	void updatePinnedViewer();
 	void checkLastPinnedClickedIdReset(int wasScrollTop, int nowScrollTop);
 	void addTranslatedItems(not_null<TranslateTracker*> tracker);
+	// Liquid glass: pinned bars float as glass capsules, global coords.
+	void setGlassBackdrop(Ui::LiquidGlass::BackdropProvider provider);
+	void updateGlass();
 
 	[[nodiscard]] int height() const;
 	[[nodiscard]] rpl::producer<int> heightValue() const;
@@ -138,6 +142,7 @@ private:
 
 	const std::unique_ptr<Ui::RpWidget> _wrap;
 	const std::unique_ptr<Ui::RpWidget> _topBars;
+	Ui::LiquidGlass::BackdropProvider _glassBackdrop;
 	std::unique_ptr<Ui::GroupCallBar> _groupCallBar;
 	std::unique_ptr<Ui::RequestsBar> _requestsBar;
 	std::unique_ptr<TranslateBar> _translateBar;

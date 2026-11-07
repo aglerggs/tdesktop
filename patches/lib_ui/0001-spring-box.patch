@@ -36,3 +36,50 @@ index f8b1aa6..d9c776d 100644
  	}
  	if (!_mainMenuCache.isNull() && mainMenuRight > 0) {
  		p.setOpacity(1.);
+diff --git a/ui/widgets/side_bar_button.cpp b/ui/widgets/side_bar_button.cpp
+index 7633972..bd19aaf 100644
+--- a/ui/widgets/side_bar_button.cpp
++++ b/ui/widgets/side_bar_button.cpp
+@@ -6,6 +6,8 @@
+ //
+ #include "ui/widgets/side_bar_button.h"
+ 
++#include <QtGui/QPainterPath>
++
+ #include "ui/effects/ripple_animation.h"
+ #include "ui/painter.h"
+ #include "styles/style_widgets.h"
+@@ -167,9 +169,32 @@ void SideBarButton::paintEvent(QPaintEvent *e) {
+ 	const auto clip = e->rect();
+ 
+ 	const auto &bg = _active ? _st.textBgActive : _st.textBg;
+-	p.fillRect(clip, bg);
++	// Liquid glass fork: the active folder is a glossy rounded pill.
++	p.fillRect(clip, _st.textBg);
++	const auto pill = QRectF(rect()).marginsRemoved({ 6., 3., 6., 3. });
++	const auto radius = std::min(14., pill.height() / 2.);
++	auto pillPath = QPainterPath();
++	pillPath.addRoundedRect(pill, radius, radius);
++	if (_active && !pill.isEmpty()) {
++		auto hq = PainterHighQualityEnabler(p);
++		p.setPen(Qt::NoPen);
++		p.setBrush(_st.textBgActive);
++		p.drawPath(pillPath);
++		auto gloss = QLinearGradient(pill.topLeft(), pill.bottomLeft());
++		gloss.setColorAt(0., QColor(255, 255, 255, 46));
++		gloss.setColorAt(0.5, QColor(255, 255, 255, 8));
++		gloss.setColorAt(1., QColor(255, 255, 255, 0));
++		p.setBrush(gloss);
++		p.drawPath(pillPath);
++		p.setBrush(Qt::NoBrush);
++		p.setPen(QPen(QColor(255, 255, 255, 40), 1.));
++		p.drawPath(pillPath);
++	}
+ 
++	p.save();
++	p.setClipPath(pillPath, Qt::IntersectClip);
+ 	RippleButton::paintRipple(p, 0, 0);
++	p.restore();
+ 
+ 	if (_lock.locked) {
+ 		p.setOpacity(kPremiumLockedOpacity);

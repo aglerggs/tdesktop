@@ -487,12 +487,15 @@ void PaintRow(
 	}
 	// Liquid glass: the selection is a glossy pill inside the row.
 	const auto glassPill = Ui::LiquidGlass::Enabled()
-		&& (context.active || context.selected)
-		&& !context.narrow;
-	const auto pill = glassPill
+		&& (context.active || context.selected);
+	// In the narrow column the pill is a rounded square around the photo.
+	const auto pill = !glassPill
+		? QRectF()
+		: context.narrow
 		? QRectF(geometry).marginsRemoved(
-			QMarginsF(st::dialogsGlassPillMargins))
-		: QRectF();
+			QMarginsF(st::dialogsGlassPillNarrowMargins))
+		: QRectF(geometry).marginsRemoved(
+			QMarginsF(st::dialogsGlassPillMargins));
 	if (glassPill) {
 		p.fillRect(geometry, context.currentBg);
 		Ui::LiquidGlass::PaintPill(

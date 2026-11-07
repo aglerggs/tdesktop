@@ -4513,10 +4513,17 @@ void ChatWidget::setupLiquidGlass() {
 	_composeControls->setGlassBackdrop([=](QRect rect) {
 		return grabGlassBackdrop(rect);
 	});
+	_topControls->setGlassBackdrop([=](QRect global) {
+		const auto shift = mapToGlobal(QPoint());
+		auto result = grabGlassBackdrop(global.translated(-shift));
+		result.rect.translate(shift);
+		return result;
+	});
 	_scroll->scrolls(
 	) | rpl::on_next([=] {
 		if (_glassTop) {
 			_topBar->update();
+			_topControls->updateGlass();
 		}
 		if (_glassBottom) {
 			_composeControls->updateGlass();

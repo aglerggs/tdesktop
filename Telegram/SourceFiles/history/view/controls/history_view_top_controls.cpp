@@ -126,6 +126,28 @@ TopControls::TopControls(
 
 TopControls::~TopControls() = default;
 
+void TopControls::updateGlass() {
+	if (!_glassBackdrop) {
+		return;
+	} else if (_pinnedBar) {
+		_pinnedBar->updateGlass();
+	}
+	if (_repliesRootView) {
+		_repliesRootView->updateGlass();
+	}
+}
+
+void TopControls::setGlassBackdrop(
+		Ui::LiquidGlass::BackdropProvider provider) {
+	_glassBackdrop = std::move(provider);
+	if (_pinnedBar && _glassBackdrop) {
+		_pinnedBar->setGlassBackdrop(_glassBackdrop);
+	}
+	if (_repliesRootView && _glassBackdrop) {
+		_repliesRootView->setGlassBackdrop(_glassBackdrop);
+	}
+}
+
 void TopControls::move(int x, int y) {
 	_wrap->move(x, y);
 }
@@ -371,6 +393,9 @@ void TopControls::setupRootView() {
 	_repliesRootView = std::make_unique<Ui::PinnedBar>(_topBars.get(), [=] {
 		return _controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
 	}, _controller->gifPauseLevelChanged());
+	if (_glassBackdrop) {
+		_repliesRootView->setGlassBackdrop(_glassBackdrop);
+	}
 	_repliesRootView->setContent(rpl::combine(
 		RootViewContent(
 			_history,
@@ -837,6 +862,9 @@ void TopControls::checkPinnedBarState() {
 		return _controller->isGifPausedAtLeastFor(
 			Window::GifPauseReason::Any);
 	}, _controller->gifPauseLevelChanged());
+	if (_glassBackdrop) {
+		_pinnedBar->setGlassBackdrop(_glassBackdrop);
+	}
 	auto pinnedRefreshed = Info::Profile::SharedMediaCountValue(
 		_history->peer,
 		topicRootId,

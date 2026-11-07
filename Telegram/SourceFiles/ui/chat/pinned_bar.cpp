@@ -184,6 +184,12 @@ void PinnedBar::setGlassBackdrop(
 	_wrap.entity()->update();
 }
 
+void PinnedBar::updateGlass() {
+	if (_glass) {
+		_wrap.entity()->update();
+	}
+}
+
 void PinnedBar::updateShadowGeometry(QRect wrapGeometry) {
 	const auto regular = QRect(
 		wrapGeometry.x(),

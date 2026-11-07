@@ -40,6 +40,7 @@ public:
 	// Liquid glass: a floating glass capsule over what the provider
 	// gives, the rect is passed and returned in global coordinates.
 	void setGlassBackdrop(Ui::LiquidGlass::BackdropProvider provider);
+	void updateGlass();
 
 	void setContent(rpl::producer<Ui::MessageBarContent> content);
 	void setRightButton(object_ptr<Ui::RpWidget> button);
