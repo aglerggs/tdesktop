@@ -1,5 +1,5 @@
 diff --git a/ui/layers/layer_widget.cpp b/ui/layers/layer_widget.cpp
-index f8b1aa6..cde7d6a 100644
+index f8b1aa6..d9c776d 100644
 --- a/ui/layers/layer_widget.cpp
 +++ b/ui/layers/layer_widget.cpp
 @@ -6,6 +6,8 @@
@@ -22,7 +22,7 @@ index f8b1aa6..cde7d6a 100644
 +			const auto t = std::clamp(layerOpacity, 0., 1.);
 +			const auto scale = 1. - 0.08 * std::exp(-5. * t) * std::cos(9. * t);
 +			const auto size = QSizeF(_layerCache.size()) / _layerCache.devicePixelRatio();
-+			const auto center = QPointF(rtl() ? (width() - topLeft.x() - size.width()) : topLeft.x(), topLeft.y()) + QPointF(size.width() / 2., size.height() / 2.);
++			const auto center = QPointF(style::RightToLeft() ? (width() - topLeft.x() - size.width()) : topLeft.x(), topLeft.y()) + QPointF(size.width() / 2., size.height() / 2.);
 +			p.save();
 +			p.setRenderHint(QPainter::SmoothPixmapTransform);
 +			p.translate(center);
