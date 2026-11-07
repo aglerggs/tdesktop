@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_saved_deleted.h"
 #include "window/window_liquid_features.h"
+#include "data/data_liquid_store.h"
+#include "window/window_liquid_extras.h"
 
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
@@ -1120,6 +1122,28 @@ void Filler::addLiquidFeatures() {
 	_addAction(u"Открыть рядом"_q, [=] {
 		Window::Liquid::OpenSideBySide(controller, thread);
 	}, &st::menuIconNewWindow);
+	_addAction(u"Посмотреть, не читая 👀"_q, [=] {
+		crl::on_main(controller, [=] {
+			controller->showChatPreview(
+				Dialogs::RowDescriptor(history, FullMsgId()));
+		});
+	}, &st::menuIconShowInChat);
+	if (!peer->isSelf()) {
+		if (Data::LiquidStore::IsHiddenChat(&peer->session(), peer->id)) {
+			_addAction(u"Вернуть в список чатов"_q, [=] {
+				Data::LiquidStore::SetHiddenChat(
+					&peer->session(),
+					peer->id,
+					false);
+				history->updateChatListExistence();
+				controller->showToast(u"Чат снова в списке"_q);
+			}, &st::menuIconUnarchive);
+		} else {
+			_addAction(u"Скрыть чат 🙈"_q, [=] {
+				Window::Liquid::HideChat(controller, history);
+			}, &st::menuIconStealthLocked);
+		}
+	}
 }
 
 void Filler::addTranslate() {

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/notifications_manager.h"
 
 #include "window/window_liquid_extras.h"
+#include "data/data_liquid_store.h"
 
 #include "base/options.h"
 #include "base/platform/base_platform_info.h"
@@ -448,7 +449,10 @@ void System::schedule(Data::ItemNotification notification) {
 	const auto thread = item->notificationThread();
 	const auto skip = skipNotification(notification);
 	if (skip.value == SkipState::Skip
-		|| Window::Liquid::FocusBlocksNotification(item->history())) {
+		|| Window::Liquid::FocusBlocksNotification(item->history())
+		|| Data::LiquidStore::IsHiddenChat(
+			&item->history()->session(),
+			item->history()->peer->id)) {
 		thread->popNotification(notification);
 		return;
 	}

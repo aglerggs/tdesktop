@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history.h"
 
+#include "data/data_liquid_store.h"
+
 #include "data/data_saved_deleted.h"
 
 #include "history/view/history_view_element.h"
@@ -3555,6 +3557,8 @@ bool History::trackUnreadMessages() const {
 bool History::shouldBeInChatList() const {
 	if (peer->migrateTo() || !folderKnown()) {
 		return false;
+	} else if (Data::LiquidStore::IsHiddenChat(&session(), peer->id)) {
+		return false; // aglergram: hidden chats live behind the PIN.
 	} else if (const auto community = peer->asChannel()
 		; community && community->isCommunity()) {
 		return !(community->flags() & ChannelDataFlag::Forbidden)

@@ -9,11 +9,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "window/window_liquid_features.h"
 #include "window/window_liquid_updates.h"
+#include "window/window_liquid_convert.h"
 
 #include "apiwrap.h"
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "data/data_chat_filters.h"
+#include "data/data_document.h"
 #include "data/data_drafts.h"
 #include "data/data_folder.h"
 #include "data/data_liquid_store.h"
@@ -26,13 +28,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "lang/lang_keys.h"
 #include "main/main_domain.h"
+#include "media/audio/media_audio.h"
+#include "media/player/media_player_instance.h"
 #include "main/main_session.h"
 #include "settings/sections/settings_chat.h"
 #include "storage/storage_domain.h"
 #include "ui/layers/generic_box.h"
+#include "ui/ui_utility.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/fields/password_input.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_controller.h"
@@ -54,6 +60,8 @@ namespace {
 constexpr auto kBookmarksKey = "bookmarks";
 constexpr auto kFocusKey = "focus";
 constexpr auto kLockScreensKey = "lockOnScreens";
+constexpr auto kLockedFoldersKey = "lockedFolders";
+constexpr auto kSkipSilenceKey = "skipSilence";
 constexpr auto kMaxRows = 200;
 
 [[nodiscard]] QString Shorten(QString text, int size) {
@@ -332,6 +340,24 @@ struct Command {
 	add(u"🎯 Профили фокуса"_q, u"focus фокус учёба профили"_q, [=] {
 		ShowFocusBox(controller);
 	});
+	add(u"⭕ Видео в кружок"_q, u"round кружок видео"_q, [=] {
+		ConvertFromFile(controller, ConvertKind::Round);
+	});
+	add(u"🎞 Видео в GIF"_q, u"gif гиф видео"_q, [=] {
+		ConvertFromFile(controller, ConvertKind::Gif);
+	});
+	add(u"⚡ Быстрые ответы"_q, u"quick быстрые ответы фразы кнопки"_q, [=] {
+		ShowQuickRepliesBox(controller);
+	});
+	add(u"🌙 Сводка дня"_q, u"summary сводка день итоги"_q, [=] {
+		ShowDaySummary(controller);
+	});
+	add(u"🙈 Скрытые чаты"_q, u"hidden скрытые чаты тайные"_q, [=] {
+		ShowHiddenChatsBox(controller);
+	});
+	add(u"🔐 PIN на папки"_q, u"pin пин папки замок"_q, [=] {
+		ShowLockedFoldersBox(controller);
+	});
 	add(u"✅ Прочитать все чаты"_q, u"read all прочитать"_q, [=] {
 		ReadAllChats(controller);
 	});
@@ -374,6 +400,71 @@ struct Command {
 	return true;
 }
 
+// Voice messages: jumps over long silent parts using the waveform.
+void StartSkipSilence() {
+	using Type = AudioMsgId::Type;
+	struct Last {
+		FullMsgId item;
+		float64 target = 0.;
+	};
+	static auto last = Last();
+	static auto lifetime = rpl::lifetime();
+	Media::Player::instance()->updatedNotifier(
+	) | rpl::filter([](const Media::Player::TrackState &state) {
+		return (state.id.type() == Type::Voice)
+			&& !Media::Player::IsPausedOrPausing(state.state)
+			&& !Media::Player::IsStoppedOrStopping(state.state)
+			&& (state.length > 0)
+			&& SkipSilence();
+	}) | rpl::on_next([](const Media::Player::TrackState &state) {
+		const auto document = state.id.audio();
+		const auto voice = document ? document->voice() : nullptr;
+		if (!voice || voice->waveform.size() < 16 || voice->waveform[0] < 0) {
+			return;
+		}
+		const auto &wave = voice->waveform;
+		const auto count = int(wave.size());
+		const auto seconds = std::max(
+			float64(document->duration()) / 1000.,
+			float64(state.length) / std::max(state.frequency, 1));
+		if (seconds < 3.) {
+			return;
+		}
+		auto loudest = 0;
+		for (const auto value : wave) {
+			loudest = std::max(loudest, int(value));
+		}
+		const auto quiet = std::max(2, loudest / 6);
+		const auto progress = float64(state.position) / state.length;
+		if (last.item == state.id.contextId() && progress < last.target) {
+			return;
+		}
+		const auto index = std::clamp(int(progress * count), 0, count - 1);
+		if (wave[index] > quiet) {
+			return;
+		}
+		auto till = index;
+		while (till < count && wave[till] <= quiet) {
+			++till;
+		}
+		const auto silent = float64(till - index) * seconds / count;
+		constexpr auto kMinSilence = 0.8;
+		constexpr auto kKeep = 0.2;
+		if (silent < kMinSilence || till >= count) {
+			return;
+		}
+		const auto target = std::clamp(
+			(float64(till) / count) - (kKeep / seconds),
+			progress,
+			1.);
+		if (target - progress < 0.3 / seconds) {
+			return;
+		}
+		last = { state.id.contextId(), target };
+		Media::Player::instance()->finishSeeking(Type::Voice, target);
+	}, lifetime);
+}
+
 } // namespace
 
 void StartExtras(not_null<SessionController*> controller) {
@@ -390,6 +481,7 @@ void StartExtras(not_null<SessionController*> controller) {
 			ShowCommandPalette(strong);
 		}
 	});
+	StartDaySummary(controller);
 
 	static auto started = false;
 	if (started) {
@@ -405,6 +497,18 @@ void StartExtras(not_null<SessionController*> controller) {
 	};
 	QObject::connect(qApp, &QGuiApplication::screenAdded, lock);
 	QObject::connect(qApp, &QGuiApplication::screenRemoved, lock);
+	StartSkipSilence();
+}
+
+bool SkipSilence() {
+	return Data::LiquidStore::Value(
+		QString::fromLatin1(kSkipSilenceKey)).toBool(false);
+}
+
+void SetSkipSilence(bool enabled) {
+	Data::LiquidStore::SetValue(
+		QString::fromLatin1(kSkipSilenceKey),
+		enabled ? QJsonValue(true) : QJsonValue());
 }
 
 bool IsBookmarked(not_null<HistoryItem*> item) {
@@ -773,6 +877,299 @@ bool FocusBlocksNotification(not_null<History*> history) {
 	return !i->peers.contains(Data::LiquidStore::PeerKey(
 		&history->session(),
 		history->peer->id));
+}
+
+namespace {
+
+[[nodiscard]] QString FoldersKey(not_null<Main::Session*> session) {
+	return QString::fromLatin1(kLockedFoldersKey)
+		+ ':'
+		+ QString::number(session->userId().bare);
+}
+
+[[nodiscard]] base::flat_set<int> LockedFolders(
+		not_null<Main::Session*> session) {
+	auto result = base::flat_set<int>();
+	for (const auto value
+		: Data::LiquidStore::Value(FoldersKey(session)).toArray()) {
+		result.emplace(value.toInt());
+	}
+	return result;
+}
+
+void SaveLockedFolders(
+		not_null<Main::Session*> session,
+		const base::flat_set<int> &ids) {
+	auto list = QJsonArray();
+	for (const auto id : ids) {
+		list.push_back(id);
+	}
+	Data::LiquidStore::SetValue(
+		FoldersKey(session),
+		list.isEmpty() ? QJsonValue() : QJsonValue(list));
+}
+
+// The folder that was opened with the PIN, until another one is chosen.
+int UnlockedFolder = 0;
+
+// PasswordInput is not an RpWidget, so it goes into a wrapper row.
+[[nodiscard]] Ui::PasswordInput *AddPasswordRow(
+		not_null<Ui::GenericBox*> box,
+		const QString &placeholder) {
+	const auto wrap = box->addRow(object_ptr<Ui::RpWidget>(box));
+	const auto field = Ui::CreateChild<Ui::PasswordInput>(
+		wrap,
+		st::defaultInputField,
+		rpl::single(placeholder));
+	wrap->resize(wrap->width(), field->height());
+	wrap->widthValue() | rpl::on_next([=](int width) {
+		field->resizeToWidth(width);
+		field->moveToLeft(0, 0);
+		wrap->resize(width, field->height());
+	}, wrap->lifetime());
+	return field;
+}
+
+} // namespace
+
+void AskPin(
+		not_null<SessionController*> controller,
+		const QString &title,
+		Fn<void()> unlocked) {
+	if (!Data::LiquidStore::HasPin()) {
+		ShowSetPinBox(controller, unlocked);
+		return;
+	}
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(title));
+		const auto field = AddPasswordRow(box, u"PIN"_q);
+		const auto attempts = std::make_shared<int>(0);
+		const auto submit = [=] {
+			if (!Data::LiquidStore::CheckPin(field->getLastText())) {
+				field->showError();
+				if (++*attempts >= 5) {
+					box->closeBox();
+					controller->showToast(u"Неверный PIN"_q);
+				}
+				return;
+			}
+			box->closeBox();
+			if (unlocked) {
+				unlocked();
+			}
+		};
+		QObject::connect(field, &Ui::MaskedInputField::submitted, submit);
+		box->setFocusCallback([=] { field->setFocusFast(); });
+		box->addButton(rpl::single(u"Открыть"_q), submit);
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
+}
+
+void ShowSetPinBox(
+		not_null<SessionController*> controller,
+		Fn<void()> done) {
+	const auto had = Data::LiquidStore::HasPin();
+	const auto setNew = [=] {
+		controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+			box->setTitle(rpl::single(had
+				? u"Новый PIN"_q
+				: u"Придумай PIN"_q));
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				u"Он закрывает скрытые чаты и папки с замком. Хранится "
+				"только на этом компьютере. Забудешь — скрытые чаты можно "
+				"вернуть, только сбросив настройки aglergram."_q,
+				st::boxDividerLabel));
+			const auto first = AddPasswordRow(box, u"PIN, хотя бы 4 символа"_q);
+			const auto second = AddPasswordRow(box, u"Ещё раз"_q);
+			const auto submit = [=] {
+				const auto pin = first->getLastText();
+				if (pin.size() < 4) {
+					first->showError();
+					return;
+				} else if (second->getLastText() != pin) {
+					second->showError();
+					return;
+				}
+				Data::LiquidStore::SetPin(pin);
+				box->closeBox();
+				controller->showToast(u"PIN сохранён 🔐"_q);
+				if (done) {
+					done();
+				}
+			};
+			QObject::connect(
+				first,
+				&Ui::MaskedInputField::submitted,
+				[=] { second->setFocus(); });
+			QObject::connect(
+				second,
+				&Ui::MaskedInputField::submitted,
+				submit);
+			box->setFocusCallback([=] { first->setFocusFast(); });
+			box->addButton(rpl::single(u"Сохранить"_q), submit);
+			box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+		}));
+	};
+	if (had) {
+		AskPin(controller, u"Сначала старый PIN"_q, setNew);
+	} else {
+		setNew();
+	}
+}
+
+void HideChat(
+		not_null<SessionController*> controller,
+		not_null<History*> history) {
+	const auto hide = [=] {
+		const auto session = &history->session();
+		Data::LiquidStore::SetHiddenChat(session, history->peer->id, true);
+		history->updateChatListExistence();
+		if (controller->activeChatCurrent().history() == history) {
+			controller->clearSectionStack();
+		}
+		controller->showToast(u"🙈 Чат скрыт. Найти: Ctrl+Shift+K → "
+			"«Скрытые чаты»"_q);
+	};
+	if (Data::LiquidStore::HasPin()) {
+		hide();
+	} else {
+		ShowSetPinBox(controller, hide);
+	}
+}
+
+void ShowHiddenChatsBox(not_null<SessionController*> controller) {
+	const auto session = &controller->session();
+	AskPin(controller, u"🙈 Скрытые чаты"_q, [=] {
+		controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+			box->setTitle(rpl::single(u"🙈 Скрытые чаты"_q));
+			box->setWidth(st::boxWideWidth);
+			const auto list = Data::LiquidStore::HiddenChats(session);
+			if (list.empty()) {
+				box->addRow(object_ptr<Ui::FlatLabel>(
+					box,
+					u"Скрытых чатов нет. Правый клик по чату → "
+					"«Скрыть чат»."_q,
+					st::boxLabel));
+			}
+			for (const auto peerId : list) {
+				const auto peer = session->data().peerLoaded(peerId);
+				const auto name = peer ? peer->name() : u"Чат"_q;
+				const auto open = box->addRow(
+					object_ptr<Ui::SettingsButton>(
+						box,
+						rpl::single(u"💬 "_q + name),
+						st::settingsButtonNoIcon),
+					style::margins());
+				open->setClickedCallback([=] {
+					box->closeBox();
+					controller->showPeerHistory(peerId);
+				});
+				const auto back = box->addRow(
+					object_ptr<Ui::SettingsButton>(
+						box,
+						rpl::single(u"      вернуть в список"_q),
+						st::settingsButtonNoIcon),
+					style::margins());
+				back->setClickedCallback([=] {
+					Data::LiquidStore::SetHiddenChat(session, peerId, false);
+					if (const auto history = session->data().historyLoaded(
+							peerId)) {
+						history->updateChatListExistence();
+					}
+					box->closeBox();
+					controller->showToast(u"Чат снова в списке"_q);
+				});
+			}
+			box->setMaxHeight(st::boxMaxListHeight * 2);
+			box->addButton(rpl::single(u"Сменить PIN"_q), [=] {
+				box->closeBox();
+				ShowSetPinBox(controller);
+			});
+			box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+		}));
+	});
+}
+
+bool AskFolderPin(
+		not_null<SessionController*> controller,
+		int filterId,
+		Fn<void()> open) {
+	if (!filterId) {
+		UnlockedFolder = 0;
+		return false;
+	} else if (UnlockedFolder == filterId) {
+		return false;
+	} else if (!LockedFolders(&controller->session()).contains(filterId)
+		|| !Data::LiquidStore::HasPin()) {
+		UnlockedFolder = 0;
+		return false;
+	}
+	AskPin(controller, u"🔐 Папка под PIN"_q, [=] {
+		UnlockedFolder = filterId;
+		open();
+	});
+	return true;
+}
+
+void ShowLockedFoldersBox(not_null<SessionController*> controller) {
+	const auto session = &controller->session();
+	const auto show = [=] {
+		controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+			box->setTitle(rpl::single(u"🔐 PIN на папки"_q));
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				u"Отмеченные папки открываются только по PIN."_q,
+				st::boxDividerLabel));
+			const auto locked = LockedFolders(session);
+			auto checks = std::make_shared<
+				std::vector<std::pair<int, Ui::Checkbox*>>>();
+			for (const auto &filter : session->data().chatsFilters().list()) {
+				if (!filter.id()) {
+					continue;
+				}
+				const auto check = box->addRow(object_ptr<Ui::Checkbox>(
+					box,
+					filter.title().text.text,
+					locked.contains(filter.id()),
+					st::defaultBoxCheckbox));
+				checks->push_back({ filter.id(), check });
+			}
+			if (checks->empty()) {
+				box->addRow(object_ptr<Ui::FlatLabel>(
+					box,
+					u"Папок пока нет."_q,
+					st::boxLabel));
+			}
+			box->addButton(rpl::single(u"Сохранить"_q), [=] {
+				auto now = base::flat_set<int>();
+				for (const auto &[id, check] : *checks) {
+					if (check->checked()) {
+						now.emplace(id);
+					}
+				}
+				SaveLockedFolders(session, now);
+				if (!now.empty() && now.contains(
+						controller->activeChatsFilterCurrent())) {
+					UnlockedFolder = controller->activeChatsFilterCurrent();
+				}
+				box->closeBox();
+				controller->showToast(now.empty()
+					? u"Папки без PIN"_q
+					: u"🔐 Готово"_q);
+			});
+			box->addButton(rpl::single(u"Сменить PIN"_q), [=] {
+				box->closeBox();
+				ShowSetPinBox(controller);
+			});
+			box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+		}));
+	};
+	if (Data::LiquidStore::HasPin()) {
+		AskPin(controller, u"🔐 PIN на папки"_q, show);
+	} else {
+		ShowSetPinBox(controller, show);
+	}
 }
 
 bool LockOnScreensChange() {

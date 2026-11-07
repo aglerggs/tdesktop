@@ -2546,11 +2546,15 @@ PRIVATE
     window/window_filters_menu.h
     window/window_history_hider.cpp
     window/window_history_hider.h
+    window/window_liquid_convert.cpp
+    window/window_liquid_convert.h
     window/window_liquid_extras.cpp
     window/window_liquid_extras.h
     window/window_liquid_features.cpp
     window/window_liquid_features.h
     window/window_liquid_updates.cpp
+    window/window_liquid_whisper.cpp
+    window/window_liquid_whisper.h
     window/window_liquid_updates.h
     window/window_liquid_intro.cpp
     window/window_liquid_intro.h

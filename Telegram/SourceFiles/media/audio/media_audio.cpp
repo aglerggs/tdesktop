@@ -1637,6 +1637,73 @@ private:
 
 } // namespace Media
 
+std::vector<int16> audioDecodeMono(
+		const Core::FileLocation &file,
+		const QByteArray &data,
+		int rate) {
+	auto loader = Media::FFMpegLoader(file, data, bytes::vector());
+	if (rate <= 0 || !loader.open(crl::time(0))) {
+		return {};
+	}
+	const auto fmt = loader.format();
+	const auto stereo = (fmt == AL_FORMAT_STEREO8)
+		|| (fmt == AL_FORMAT_STEREO16);
+	const auto eight = (fmt == AL_FORMAT_MONO8)
+		|| (fmt == AL_FORMAT_STEREO8);
+	const auto step = float64(std::max(loader.samplesFrequency(), 1))
+		/ rate;
+	auto result = std::vector<int16>();
+	auto position = 0.;
+	auto index = int64(0);
+	auto sum = 0.;
+	auto count = 0;
+	const auto push = [&](float64 sample) {
+		sum += sample;
+		++count;
+		if (++index >= position + step) {
+			position += step;
+			result.push_back(int16(std::clamp(sum / count, -32768., 32767.)));
+			sum = 0.;
+			count = 0;
+		}
+	};
+	for (;;) {
+		const auto read = loader.readMore();
+		if (const auto error = std::get_if<Media::AudioPlayerLoader::ReadError>(
+				&read)) {
+			using Error = Media::AudioPlayerLoader::ReadError;
+			if (*error == Error::Retry || *error == Error::RetryNotQueued) {
+				continue;
+			}
+			break;
+		}
+		const auto span = v::get<bytes::const_span>(read);
+		const auto bytes = reinterpret_cast<const uchar*>(span.data());
+		const auto size = int64(span.size());
+		const auto channels = stereo ? 2 : 1;
+		if (eight) {
+			for (auto i = int64(0); i + channels - 1 < size; i += channels) {
+				auto value = (int(bytes[i]) - 128) * 256.;
+				if (stereo) {
+					value = (value + (int(bytes[i + 1]) - 128) * 256.) / 2.;
+				}
+				push(value);
+			}
+		} else {
+			const auto samples = reinterpret_cast<const int16*>(bytes);
+			const auto total = size / 2;
+			for (auto i = int64(0); i + channels - 1 < total; i += channels) {
+				auto value = float64(samples[i]);
+				if (stereo) {
+					value = (value + samples[i + 1]) / 2.;
+				}
+				push(value);
+			}
+		}
+	}
+	return result;
+}
+
 VoiceWaveform audioCountWaveform(
 		const Core::FileLocation &file,
 		const QByteArray &data) {

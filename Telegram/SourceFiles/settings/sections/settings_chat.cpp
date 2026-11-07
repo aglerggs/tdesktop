@@ -66,6 +66,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_liquid_store.h"
 #include "window/window_liquid_features.h"
 #include "window/window_liquid_extras.h"
+#include "window/window_liquid_convert.h"
 #include "storage/storage_domain.h"
 #include "main/main_domain.h"
 #include "window/window_liquid_updates.h"
@@ -928,6 +929,43 @@ void SetupLiquidGlass(
 	addLiquidButton(u"🎯 Профили фокуса"_q, [=] {
 		Window::Liquid::ShowFocusBox(controller);
 	});
+	addLiquidButton(u"⚡ Быстрые ответы"_q, [=] {
+		Window::Liquid::ShowQuickRepliesBox(controller);
+	});
+	addLiquidButton(u"🌙 Сводка дня"_q, [=] {
+		Window::Liquid::ShowDaySummary(controller);
+	});
+	{
+		const auto summary = container->add(object_ptr<Ui::SettingsButton>(
+			container,
+			rpl::single(u"Показывать сводку дня в 21:00"_q),
+			st::settingsButtonNoIcon));
+		summary->toggleOn(rpl::single(Window::Liquid::DaySummaryEnabled()));
+		summary->toggledChanges() | rpl::on_next([=](bool enabled) {
+			Window::Liquid::SetDaySummaryEnabled(enabled);
+		}, summary->lifetime());
+	}
+	addLiquidButton(u"⭕ Видео в кружок"_q, [=] {
+		Window::Liquid::ConvertFromFile(
+			controller,
+			Window::Liquid::ConvertKind::Round);
+	});
+	addLiquidButton(u"🙈 Скрытые чаты"_q, [=] {
+		Window::Liquid::ShowHiddenChatsBox(controller);
+	});
+	addLiquidButton(u"🔐 PIN на папки"_q, [=] {
+		Window::Liquid::ShowLockedFoldersBox(controller);
+	});
+	{
+		const auto skip = container->add(object_ptr<Ui::SettingsButton>(
+			container,
+			rpl::single(u"Пропускать тишину в голосовых"_q),
+			st::settingsButtonNoIcon));
+		skip->toggleOn(rpl::single(Window::Liquid::SkipSilence()));
+		skip->toggledChanges() | rpl::on_next([=](bool enabled) {
+			Window::Liquid::SetSkipSilence(enabled);
+		}, skip->lifetime());
+	}
 	{
 		const auto lock = container->add(object_ptr<Ui::SettingsButton>(
 			container,

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_session_controller.h"
 
+#include "window/window_liquid_extras.h"
+
 #include "apiwrap.h"
 #include "api/api_cloud_password.h"
 #include "api/api_text_entities.h"
@@ -3476,6 +3478,11 @@ void SessionController::setActiveChatsFilter(
 		return;
 	}
 	const auto changed = (activeChatsFilterCurrent() != id);
+	if (changed && Window::Liquid::AskFolderPin(this, id, [=] {
+			setActiveChatsFilter(id, params);
+		})) {
+		return; // aglergram: the folder opens after the right PIN.
+	}
 	if (changed) {
 		resetFakeUnreadWhileOpened();
 	}

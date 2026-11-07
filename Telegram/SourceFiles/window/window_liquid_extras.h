@@ -38,6 +38,33 @@ void ShowCommandPalette(not_null<SessionController*> controller);
 void ShowFocusBox(not_null<SessionController*> controller);
 [[nodiscard]] bool FocusBlocksNotification(not_null<History*> history);
 
+// PIN of hidden chats and locked folders.
+void AskPin(
+	not_null<SessionController*> controller,
+	const QString &title,
+	Fn<void()> unlocked);
+void ShowSetPinBox(
+	not_null<SessionController*> controller,
+	Fn<void()> done = nullptr);
+
+// Hidden chats: out of the list, silent, behind the PIN.
+void HideChat(
+	not_null<SessionController*> controller,
+	not_null<History*> history);
+void ShowHiddenChatsBox(not_null<SessionController*> controller);
+
+// Folders behind the PIN. True when the PIN is asked first, then
+// `open` is called after the right PIN.
+[[nodiscard]] bool AskFolderPin(
+	not_null<SessionController*> controller,
+	int filterId,
+	Fn<void()> open);
+void ShowLockedFoldersBox(not_null<SessionController*> controller);
+
+// Skipping long silent parts of voice messages, by their waveform.
+[[nodiscard]] bool SkipSilence();
+void SetSkipSilence(bool enabled);
+
 // Lock with the local passcode when a monitor is added or removed.
 [[nodiscard]] bool LockOnScreensChange();
 void SetLockOnScreensChange(bool enabled);

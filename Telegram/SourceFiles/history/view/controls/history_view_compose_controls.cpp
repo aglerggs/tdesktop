@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/controls/history_view_compose_controls.h"
 
+#include "window/window_liquid_convert.h"
+
 #include "window/window_liquid_features.h"
 
 #include "history/view/controls/history_view_bot_menu_button.h"
@@ -2868,6 +2870,25 @@ void ComposeControls::init() {
 	_tabbedSelectorToggle->setAccessibleName(tr::lng_emoji_sticker_gif(tr::now));
 
 	initField();
+	_quickReplies = Window::Liquid::CreateQuickRepliesStrip(
+		_wrap.get(),
+		[=](QString text) {
+			if (!_history || _writeRestriction.current() || _hidden.current()) {
+				return;
+			}
+			auto kept = _field->getTextWithTags();
+			_field->setTextWithTags({ text });
+			_sendCustomRequests.fire(Api::SendOptions());
+			crl::on_main(_wrap.get(), [=] {
+				if (_field->getTextWithTags().text.isEmpty()
+					&& !kept.text.isEmpty()) {
+					_field->setTextWithTags(kept);
+				}
+			});
+		}).get();
+	_quickReplies->heightValue() | rpl::on_next([=] {
+		updateHeight();
+	}, _quickReplies->lifetime());
 	initTabbedSelector();
 	initSendButton();
 	initAiButton();
@@ -5150,6 +5171,10 @@ void ComposeControls::updateControlsGeometry(QSize size) {
 	_header->moveToLeft(
 		0,
 		fieldTop - _st.padding.top() - _header->height());
+	if (_quickReplies) {
+		_quickReplies->resizeToWidth(size.width());
+		_quickReplies->moveToLeft(0, 0);
+	}
 
 	auto right = 0;
 	if (_starsReaction) {
@@ -5928,6 +5953,7 @@ int ComposeControls::composeFieldHeight() const {
 
 void ComposeControls::updateHeight() {
 	const auto height = (_header->isDisplayed() ? _header->height() : 0)
+		+ (_quickReplies ? _quickReplies->height() : 0)
 		+ _st.padding.top()
 		+ composeFieldHeight()
 		+ _st.padding.bottom();

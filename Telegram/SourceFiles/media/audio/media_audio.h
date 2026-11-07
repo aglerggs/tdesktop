@@ -397,6 +397,13 @@ bool audioCheckError();
 
 VoiceWaveform audioCountWaveform(const Core::FileLocation &file, const QByteArray &data);
 
+// aglergram: decodes any playable audio to mono 16-bit PCM at `rate`,
+// for the local speech recognition. Empty on failure.
+std::vector<int16> audioDecodeMono(
+	const Core::FileLocation &file,
+	const QByteArray &data,
+	int rate);
+
 namespace Media {
 namespace Audio {
 

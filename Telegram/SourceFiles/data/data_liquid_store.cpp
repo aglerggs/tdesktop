@@ -8,6 +8,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_liquid_store.h"
 
 #include "main/main_session.h"
+#include "base/random.h"
+
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QSet>
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -170,6 +174,91 @@ rpl::producer<QString> ValueChanges() {
 
 QString PeerKey(not_null<Main::Session*> session, PeerId peer) {
 	return NoteKey(session, peer);
+}
+
+namespace {
+
+[[nodiscard]] QSet<QString> &HiddenCache() {
+	static auto result = [] {
+		auto set = QSet<QString>();
+		for (const auto value : Value(u"hidden"_q).toArray()) {
+			set.insert(value.toString());
+		}
+		return set;
+	}();
+	return result;
+}
+
+[[nodiscard]] QByteArray PinHash(const QByteArray &salt, const QString &pin) {
+	auto result = salt + pin.toUtf8();
+	for (auto i = 0; i != 20000; ++i) {
+		result = QCryptographicHash::hash(
+			salt + result,
+			QCryptographicHash::Sha256);
+	}
+	return result;
+}
+
+} // namespace
+
+bool IsHiddenChat(not_null<Main::Session*> session, PeerId peer) {
+	const auto &cache = HiddenCache();
+	return !cache.isEmpty() && cache.contains(NoteKey(session, peer));
+}
+
+void SetHiddenChat(
+		not_null<Main::Session*> session,
+		PeerId peer,
+		bool hidden) {
+	auto &cache = HiddenCache();
+	const auto key = NoteKey(session, peer);
+	if (hidden) {
+		cache.insert(key);
+	} else {
+		cache.remove(key);
+	}
+	auto list = QJsonArray();
+	for (const auto &entry : cache) {
+		list.push_back(entry);
+	}
+	SetValue(u"hidden"_q, list.isEmpty() ? QJsonValue() : QJsonValue(list));
+}
+
+std::vector<PeerId> HiddenChats(not_null<Main::Session*> session) {
+	auto result = std::vector<PeerId>();
+	const auto prefix = QString::number(session->userId().bare) + ':';
+	for (const auto &key : HiddenCache()) {
+		if (key.startsWith(prefix)) {
+			result.push_back(PeerId(key.mid(prefix.size()).toULongLong()));
+		}
+	}
+	return result;
+}
+
+bool HasPin() {
+	return !Value(u"pin"_q).toObject().value(u"hash"_q).toString().isEmpty();
+}
+
+bool CheckPin(const QString &pin) {
+	const auto object = Value(u"pin"_q).toObject();
+	const auto salt = QByteArray::fromBase64(
+		object.value(u"salt"_q).toString().toLatin1());
+	const auto hash = QByteArray::fromBase64(
+		object.value(u"hash"_q).toString().toLatin1());
+	return !hash.isEmpty() && (PinHash(salt, pin) == hash);
+}
+
+void SetPin(const QString &pin) {
+	if (pin.isEmpty()) {
+		SetValue(u"pin"_q, QJsonValue());
+		return;
+	}
+	auto salt = QByteArray(16, Qt::Uninitialized);
+	base::RandomFill(salt.data(), salt.size());
+	SetValue(u"pin"_q, QJsonObject{
+		{ u"salt"_q, QString::fromLatin1(salt.toBase64()) },
+		{ u"hash"_q, QString::fromLatin1(PinHash(salt, pin).toBase64()) },
+	});
 }
 
 QString Folder() {

@@ -90,6 +90,23 @@ void SetValue(const QString &key, const QJsonValue &value);
 // "user:peer" key, the same as for the notes.
 [[nodiscard]] QString PeerKey(not_null<Main::Session*> session, PeerId peer);
 
+// Hidden chats: out of the chats list and silent, opened from a box
+// behind the PIN.
+[[nodiscard]] bool IsHiddenChat(
+	not_null<Main::Session*> session,
+	PeerId peer);
+void SetHiddenChat(
+	not_null<Main::Session*> session,
+	PeerId peer,
+	bool hidden);
+[[nodiscard]] std::vector<PeerId> HiddenChats(
+	not_null<Main::Session*> session);
+
+// The PIN of hidden chats and locked folders, only its salted hash.
+[[nodiscard]] bool HasPin();
+[[nodiscard]] bool CheckPin(const QString &pin);
+void SetPin(const QString &pin);
+
 // Text recognized on photos, per chat: message id -> text.
 [[nodiscard]] base::flat_map<MsgId, QString> RecognizedTexts(
 	not_null<Main::Session*> session,
