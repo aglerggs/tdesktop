@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/reaction_fly_animation.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/painter.h"
+#include "ui/effects/liquid_glass.h"
 #include "ui/rect.h"
 #include "ui/power_saving.h"
 #include "styles/style_chat.h"
@@ -735,6 +736,28 @@ void InlineList::paintSingleBg(
 		const auto radius = fill.height() / 2.;
 		p.setBrush(color);
 		p.drawRoundedRect(fill, radius, radius);
+		if (Ui::LiquidGlass::Enabled()) {
+			// Liquid glass: a glossy capsule with a light rim on top.
+			auto hq = PainterHighQualityEnabler(p);
+			const auto rect = QRectF(fill);
+			auto gloss = QLinearGradient(rect.topLeft(), rect.bottomLeft());
+			gloss.setColorAt(0., QColor(255, 255, 255, 70));
+			gloss.setColorAt(0.5, QColor(255, 255, 255, 12));
+			gloss.setColorAt(1., QColor(255, 255, 255, 0));
+			p.setBrush(gloss);
+			p.drawRoundedRect(rect, radius, radius);
+			auto rim = QLinearGradient(rect.topLeft(), rect.bottomLeft());
+			rim.setColorAt(0., QColor(255, 255, 255, 120));
+			rim.setColorAt(1., QColor(255, 255, 255, 20));
+			p.setBrush(Qt::NoBrush);
+			p.setPen(QPen(QBrush(rim), 1.));
+			const auto half = 0.5;
+			p.drawRoundedRect(
+				rect.marginsRemoved({ half, half, half, half }),
+				radius - half,
+				radius - half);
+			p.setPen(Qt::NoPen);
+		}
 		return;
 	}
 	validateTagBg(color);

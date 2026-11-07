@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/painter.h"
+#include "ui/ui_utility.h"
 #include "ui/rp_widget.h"
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
@@ -182,6 +183,10 @@ void Button::setSelected(bool selected, anim::type animated) {
 }
 
 void Button::paintEvent(QPaintEvent *e) {
+	if (Ui::LiquidGlass::Enabled()) {
+		// The sliding glass pill is painted by the panel below.
+		return;
+	}
 	const auto selected = _selected ? 1. : 0.;
 	const auto selection = _overAnimation.value(selected);
 	if (selection <= 0.) {
@@ -207,6 +212,10 @@ void Button::mouseMoveEvent(QMouseEvent *e) {
 }
 
 } // namespace
+
+[[nodiscard]] static float64 Lerp(float64 from, float64 to, float64 progress) {
+	return from + (to - from) * progress;
+}
 
 struct ChatSwitchProcess::Entry {
 	not_null<Data::Thread*> thread;
@@ -293,6 +302,55 @@ void ChatSwitchProcess::setSelected(int index) {
 	if (_selected >= 0) {
 		_entries[_selected].button->setSelected(true);
 	}
+	updateSelectionPill(true);
+}
+
+QRect ChatSwitchProcess::selectionTarget() const {
+	if (_selected < 0 || _selected >= int(_entries.size())) {
+		return QRect();
+	}
+	const auto button = _entries[_selected].button.get();
+	return button->isHidden()
+		? QRect()
+		: button->geometry().translated(_shadowed.topLeft());
+}
+
+void ChatSwitchProcess::updateSelectionPill(bool animated) {
+	if (!_glass) {
+		return;
+	}
+	const auto target = QRectF(selectionTarget());
+	if (target.isEmpty()) {
+		_pillAnimation.stop();
+		_pillFrom = _pillTo = QRectF();
+		_view->update();
+		return;
+	}
+	const auto progress = _pillAnimation.value(1.);
+	const auto current = (_pillTo.isEmpty() || _pillFrom.isEmpty())
+		? _pillTo
+		: QRectF(
+			Lerp(_pillFrom.x(), _pillTo.x(), progress),
+			Lerp(_pillFrom.y(), _pillTo.y(), progress),
+			Lerp(_pillFrom.width(), _pillTo.width(), progress),
+			Lerp(
+				_pillFrom.height(),
+				_pillTo.height(),
+				progress));
+	_pillFrom = current.isEmpty() ? target : current;
+	_pillTo = target;
+	if (animated && !current.isEmpty() && current != target) {
+		_pillAnimation.start(
+			[=] { _view->update(); },
+			0.,
+			1.,
+			crl::time(380),
+			anim::easeOutBack);
+	} else {
+		_pillAnimation.stop();
+		_pillFrom = target;
+	}
+	_view->update();
 }
 
 void ChatSwitchProcess::setupWidget(not_null<Ui::RpWidget*> geometry) {
@@ -400,14 +458,97 @@ void ChatSwitchProcess::setupView() {
 	}, _view->lifetime());
 	_view->show();
 
+	if (Ui::LiquidGlass::Enabled()) {
+		// Snapshot the window under the panel once, the panel is short-lived.
+		if (const auto parent = _widget->parentWidget()) {
+			const auto grab = Ui::GrabWidgetToImage(parent);
+			if (!grab.isNull()) {
+				_glassSnapshot = grab.scaled(
+					parent->size(),
+					Qt::IgnoreAspectRatio,
+					Qt::SmoothTransformation);
+				_glassSnapshot.setDevicePixelRatio(1.);
+				_glassSnapshotRect = QRect(
+					-_widget->pos(),
+					parent->size());
+			}
+		}
+		_glass = std::make_unique<Ui::LiquidGlass::Surface>();
+		_glass->setStyle(Ui::LiquidGlass::MakeStyle(
+			st::boxBg->c,
+			st::boxRadius * 2));
+		_appearAnimation.start(
+			[=] { _view->update(); },
+			0.,
+			1.,
+			crl::time(420),
+			anim::linear);
+	}
+
 	_view->paintRequest() | rpl::on_next([=](QRect clip) {
 		if (_outer.isEmpty()) {
 			return;
 		}
 		auto p = QPainter(_view);
 		p.translate(-_shadowed.topLeft());
-		Ui::Shadow::paint(p, _outer, _view->width(), st::boxRoundShadow);
-		_bg.paint(p, _outer);
+		if (!_glass) {
+			Ui::Shadow::paint(p, _outer, _view->width(), st::boxRoundShadow);
+			_bg.paint(p, _outer);
+			return;
+		}
+		// Springy appearance: 90% -> ~102% -> 100% with a quick fade.
+		const auto t = _appearAnimation.value(1.);
+		const auto scale = (t >= 1.)
+			? 1.
+			: (1. - 0.1 * std::exp(-6. * t) * std::cos(10. * t));
+		p.setOpacity(std::min(1., t * 4.));
+		const auto center = QRectF(_outer).center();
+		p.translate(center);
+		p.scale(scale, scale);
+		p.translate(-center);
+		auto backdrop = Ui::LiquidGlass::Backdrop{
+			.image = _glassSnapshot,
+			.rect = _glassSnapshotRect,
+		};
+		_glass->paint(p, _outer, backdrop);
+
+		const auto progress = _pillAnimation.value(1.);
+		const auto pill = _pillFrom.isEmpty()
+			? _pillTo
+			: QRectF(
+				Lerp(_pillFrom.x(), _pillTo.x(), progress),
+				Lerp(_pillFrom.y(), _pillTo.y(), progress),
+				Lerp(
+					_pillFrom.width(),
+					_pillTo.width(),
+					progress),
+				Lerp(
+					_pillFrom.height(),
+					_pillTo.height(),
+					progress));
+		if (!pill.isEmpty()) {
+			auto hq = PainterHighQualityEnabler(p);
+			const auto radius = st::boxRadius * 1.5;
+			auto accent = st::defaultRoundCheckbox.bgActive->c;
+			accent.setAlphaF(0.22);
+			p.setPen(Qt::NoPen);
+			p.setBrush(accent);
+			p.drawRoundedRect(pill, radius, radius);
+			auto gloss = QLinearGradient(pill.topLeft(), pill.bottomLeft());
+			gloss.setColorAt(0., QColor(255, 255, 255, 60));
+			gloss.setColorAt(0.5, QColor(255, 255, 255, 8));
+			gloss.setColorAt(1., QColor(255, 255, 255, 0));
+			p.setBrush(gloss);
+			p.drawRoundedRect(pill, radius, radius);
+			auto rim = st::defaultRoundCheckbox.bgActive->c;
+			rim.setAlphaF(0.75);
+			p.setBrush(Qt::NoBrush);
+			p.setPen(QPen(rim, 1.5));
+			p.drawRoundedRect(
+				pill.marginsRemoved({ 0.75, 0.75, 0.75, 0.75 }),
+				radius,
+				radius);
+		}
 	}, _view->lifetime());
 
 	_view->events() | rpl::on_next([=](not_null<QEvent*> e) {
@@ -487,6 +628,7 @@ void ChatSwitchProcess::layout(QSize size) {
 
 	_shadowed = _outer.marginsAdded(st::boxRoundShadow.extend);
 	_view->setGeometry(_shadowed);
+	updateSelectionPill(false);
 }
 
 rpl::lifetime &ChatSwitchProcess::lifetime() {

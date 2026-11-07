@@ -592,6 +592,7 @@ Message::Message(
 			_hideReply = 1;
 		}
 	}
+	_bottomInfo.setRepaintCallback([=] { repaint(); });
 	initLogEntryOriginal();
 	initPsa();
 	if (data->displayHiddenSenderInfo()) {

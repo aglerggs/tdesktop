@@ -113,6 +113,48 @@ index ebb7796..95c5329 100644
  
  boxButtonFont: font(boxFontSize semibold);
  defaultBoxButtonTextStyle: TextStyle(semiboldTextStyle) {
+diff --git a/ui/widgets/box_content_divider.cpp b/ui/widgets/box_content_divider.cpp
+index 948271f..b814c67 100644
+--- a/ui/widgets/box_content_divider.cpp
++++ b/ui/widgets/box_content_divider.cpp
+@@ -6,6 +6,8 @@
+ //
+ #include "ui/widgets/box_content_divider.h"
+ 
++#include "ui/painter.h"
++
+ #include "styles/style_layers.h"
+ #include "styles/style_widgets.h"
+ #include "styles/palette.h"
+@@ -30,6 +32,28 @@ void BoxContentDivider::paintEvent(QPaintEvent *e) {
+ 	QPainter p(this);
+ 
+ 	p.fillRect(e->rect(), _st.bg);
++
++	// Liquid glass fork: the sections around a divider look like cards,
++	// their ends are rounded into the divider instead of shadow lines.
++	const auto radius = std::clamp((height() - 2) / 2, 0, 12);
++	if (radius >= 3) {
++		auto hq = PainterHighQualityEnabler(p);
++		p.setPen(Qt::NoPen);
++		p.setBrush(st::windowBg);
++		if (_parts & RectPart::Top) {
++			p.drawRoundedRect(
++				QRect(0, -radius, width(), 2 * radius),
++				radius,
++				radius);
++		}
++		if (_parts & RectPart::Bottom) {
++			p.drawRoundedRect(
++				QRect(0, height() - radius, width(), 2 * radius),
++				radius,
++				radius);
++		}
++		return;
++	}
+ 	if (_parts & RectPart::Top) {
+ 		paintTop(p);
+ 	}
 diff --git a/ui/widgets/side_bar_button.cpp b/ui/widgets/side_bar_button.cpp
 index 7633972..bd19aaf 100644
 --- a/ui/widgets/side_bar_button.cpp

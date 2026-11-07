@@ -136,6 +136,7 @@ void SaveSettings() {
 	object.insert(u"enabled"_q, GlobalSettings.enabled);
 	object.insert(u"blur"_q, GlobalSettings.blur);
 	object.insert(u"tint"_q, GlobalSettings.tint);
+	object.insert(u"intro"_q, GlobalSettings.intro);
 	auto file = QFile(SettingsPath);
 	if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
 		file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
@@ -160,6 +161,7 @@ void LoadSettings(const QString &path) {
 		loaded.enabled = object.value(u"enabled"_q).toBool(true);
 		loaded.blur = object.value(u"blur"_q).toDouble(1.);
 		loaded.tint = object.value(u"tint"_q).toDouble(1.);
+		loaded.intro = object.value(u"intro"_q).toBool(true);
 		GlobalSettings = Normalized(loaded);
 	}
 	EnabledAtStart = GlobalSettings.enabled;

@@ -1019,6 +1019,21 @@ private:
 	};
 	SendingLanding _sendingLanding;
 	base::Timer _sendingLandingTimer;
+
+	// Liquid glass: new messages spring into place, sent ones get a shine.
+	struct GlassAppear {
+		crl::time start = 0;
+		bool out = false;
+		bool flight = false;
+	};
+	base::flat_map<FullMsgId, GlassAppear> _glassAppear;
+	Ui::Animations::Basic _glassAppearTicker;
+	void glassAppearStart(not_null<Element*> view, bool flight);
+	void glassAppearStep();
+	[[nodiscard]] bool glassAppearPaint(
+		Painter &p,
+		not_null<Element*> view,
+		const Fn<void()> &draw);
 	int _itemsRevealHeight = 0;
 	rpl::event_stream<> _itemsRevealHeightChanges;
 	base::flat_set<not_null<const HistoryItem*>> _animatedStickersPlayed;

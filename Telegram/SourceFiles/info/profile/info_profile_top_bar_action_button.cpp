@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_top_bar_action_button.h"
 
+#include "ui/effects/liquid_glass.h"
+
 #include "ui/effects/animation_value.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/painter.h"
@@ -134,6 +136,28 @@ void TopBarActionButton::paintEvent(QPaintEvent *e) {
 			p.setBrush(*_rippleColor);
 			p.drawRoundedRect(rect(), st::boxRadius, st::boxRadius);
 			p.setOpacity(progress);
+		}
+		if (Ui::LiquidGlass::Enabled()) {
+			// Liquid glass: glossy top, bright upper rim, soft lower rim.
+			const auto r = QRectF(rect());
+			const auto radius = float64(st::boxRadius);
+			auto gloss = QLinearGradient(r.topLeft(), r.bottomLeft());
+			gloss.setColorAt(0., QColor(255, 255, 255, 64));
+			gloss.setColorAt(0.45, QColor(255, 255, 255, 14));
+			gloss.setColorAt(1., QColor(255, 255, 255, 0));
+			p.setBrush(gloss);
+			p.drawRoundedRect(r, radius, radius);
+			auto rim = QLinearGradient(r.topLeft(), r.bottomLeft());
+			rim.setColorAt(0., QColor(255, 255, 255, 150));
+			rim.setColorAt(0.5, QColor(255, 255, 255, 30));
+			rim.setColorAt(1., QColor(255, 255, 255, 70));
+			p.setBrush(Qt::NoBrush);
+			p.setPen(QPen(QBrush(rim), 1.));
+			p.drawRoundedRect(
+				r.marginsRemoved({ 0.5, 0.5, 0.5, 0.5 }),
+				radius - 0.5,
+				radius - 0.5);
+			p.setPen(Qt::NoPen);
 		}
 	}
 

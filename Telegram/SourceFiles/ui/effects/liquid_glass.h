@@ -20,6 +20,7 @@ struct Settings {
 	bool enabled = true; // Applied after a restart.
 	float64 blur = 1.; // Blur radius multiplier, applied at once.
 	float64 tint = 1.; // Tint strength multiplier, applied at once.
+	bool intro = true; // Startup splash and welcome screen.
 };
 inline constexpr auto kMinBlur = 0.25;
 inline constexpr auto kMaxBlur = 2.;

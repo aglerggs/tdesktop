@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_object.h"
 #include "ui/text/text.h"
 #include "base/flags.h"
+#include "ui/effects/animations.h"
 
 namespace Ui {
 struct ChatPaintContext;
@@ -70,6 +71,8 @@ public:
 	~BottomInfo();
 
 	void update(Data &&data, int availableWidth);
+	// Liquid glass: animates the check marks when the send state changes.
+	void setRepaintCallback(Fn<void()> callback);
 
 	[[nodiscard]] int firstLineWidth() const;
 	[[nodiscard]] bool isWide() const;
@@ -125,6 +128,9 @@ private:
 
 	const not_null<::Data::Reactions*> _reactionsOwner;
 	Data _data;
+	Fn<void()> _repaint;
+	mutable int _checkState = -1;
+	mutable Ui::Animations::Simple _checkAnimation;
 	Ui::Text::String _authorEditedDate;
 	Ui::Text::String _views;
 	Ui::Text::String _replies;

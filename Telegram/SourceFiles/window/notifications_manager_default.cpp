@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/notifications_manager_default.h"
 
+#include "ui/effects/liquid_glass.h"
+
 #include "platform/platform_notifications_manager.h"
 #include "platform/platform_specific.h"
 #include "core/application.h"
@@ -537,10 +539,50 @@ Widget::Widget(
 	Ui::Platform::InitOnTopPanel(this);
 
 	_a_opacity.start([this] { opacityAnimationCallback(); }, 0., 1., st::notifyFastAnim);
+	if (Ui::LiquidGlass::Enabled() && !anim::Disabled()) {
+		_slideIn.start(
+			[=] { moveByShift(); },
+			0.,
+			1.,
+			crl::time(620),
+			anim::linear);
+	}
+}
+
+int Widget::slideOffset() const {
+	if (!Ui::LiquidGlass::Enabled()) {
+		return 0;
+	}
+	const auto screen = QGuiApplication::screenAt(
+		_startPosition + QPoint(width() / 2, 0));
+	const auto available = screen
+		? screen->availableGeometry()
+		: QRect(_startPosition, size());
+	const auto fromLeft = (_startPosition.x() + width() / 2)
+		< available.center().x();
+	const auto distance = fromLeft
+		? (_startPosition.x() - available.x() + width() + 24)
+		: (available.x() + available.width() - _startPosition.x() + 24);
+	const auto sign = fromLeft ? -1. : 1.;
+	auto amount = 0.;
+	if (_slideIn.animating()) {
+		// Underdamped spring: flies in, overshoots a bit and settles.
+		const auto t = _slideIn.value(1.);
+		amount = std::exp(-6. * t) * std::cos(9. * t);
+	}
+	if (_hiding) {
+		// Slides back out to its edge while fading.
+		const auto opacity = _a_opacity.value(0.);
+		amount += (1. - opacity) * (1. - opacity) * 0.7;
+	}
+	return int(base::SafeRound(sign * distance * amount));
 }
 
 void Widget::opacityAnimationCallback() {
 	updateOpacity();
+	if (_hiding) {
+		moveByShift();
+	}
 	update();
 	if (!_a_opacity.animating() && _hiding) {
 		if (underMouse()) {
@@ -647,7 +689,9 @@ QPoint Widget::computePosition(int height) const {
 	if (_direction == Direction::Up) {
 		realShift = -realShift - height;
 	}
-	return QPoint(_startPosition.x(), _startPosition.y() + realShift);
+	return QPoint(
+		_startPosition.x() + slideOffset(),
+		_startPosition.y() + realShift);
 }
 
 Background::Background(QWidget *parent) : RpWidget(parent) {
@@ -823,6 +867,15 @@ void Notification::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 	p.setClipRect(e->rect());
 	p.drawImage(0, 0, _cache);
+	if (Ui::LiquidGlass::Enabled()) {
+		// A soft glass sheen over the popup.
+		auto sheen = QLinearGradient(0, 0, 0, height());
+		sheen.setColorAt(0., QColor(255, 255, 255, 34));
+		sheen.setColorAt(0.4, QColor(255, 255, 255, 6));
+		sheen.setColorAt(1., QColor(255, 255, 255, 0));
+		p.fillRect(rect(), sheen);
+		p.fillRect(0, 0, width(), 1, QColor(255, 255, 255, 70));
+	}
 
 	auto buttonsTop = st::notifyTextTop + st::semiboldFont->height;
 	if (a_actionsOpacity.animating()) {

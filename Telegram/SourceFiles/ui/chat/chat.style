@@ -324,8 +324,8 @@ historyInfoToast: Toast(defaultToast) {
 historyInfoToastIcon: icon {{ "toast/info", toastFg }};
 
 // Liquid glass design: softer, rounder bubbles.
-bubbleRadiusSmall: 8px;
-bubbleRadiusLarge: 18px;
+bubbleRadiusSmall: 10px;
+bubbleRadiusLarge: 20px;
 
 historyPhotoLeft: 14px;
 historyPhotoBubbleMinWidth: 200px;

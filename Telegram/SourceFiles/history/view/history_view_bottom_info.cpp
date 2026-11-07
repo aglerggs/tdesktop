@@ -102,6 +102,10 @@ BottomInfo::BottomInfo(
 
 BottomInfo::~BottomInfo() = default;
 
+void BottomInfo::setRepaintCallback(Fn<void()> callback) {
+	_repaint = std::move(callback);
+}
+
 void BottomInfo::update(Data &&data, int availableWidth) {
 	_data = std::move(data);
 	layout();
@@ -292,10 +296,46 @@ void BottomInfo::paint(
 			: (inverted
 				? st->historyReceivedInvertedIcon()
 				: stm->historyReceivedIcon);
-		icon.paint(
-			p,
-			QPoint(right, firstLineBottom) + st::historySendStatePosition,
-			outer(right + st::historySendStatePosition.x(), icon));
+		// Liquid glass: a new check is drawn in with a left-to-right stroke,
+		// the second check of "read" catches up with the first one.
+		const auto state = (_data.flags & Data::Flag::Sending)
+			? 0
+			: unread
+			? 1
+			: 2;
+		if (_checkState >= 0 && state > _checkState && _repaint) {
+			_checkAnimation.start(
+				_repaint,
+				0.,
+				1.,
+				crl::time(state == 2 ? 360 : 260),
+				anim::easeOutCubic);
+		}
+		_checkState = state;
+		const auto progress = _checkAnimation.value(1.);
+		const auto iconPosition = QPoint(right, firstLineBottom)
+			+ st::historySendStatePosition;
+		if (progress < 1. && state > 0) {
+			const auto iconLeft = (style::RightToLeft() && !leftToRight)
+				? (outerWidth - iconPosition.x() - icon.width())
+				: iconPosition.x();
+			p.save();
+			p.setClipRect(
+				iconLeft,
+				iconPosition.y() - icon.height(),
+				int(std::ceil(icon.width() * progress)),
+				icon.height() * 3);
+			icon.paint(
+				p,
+				iconPosition,
+				outer(right + st::historySendStatePosition.x(), icon));
+			p.restore();
+		} else {
+			icon.paint(
+				p,
+				iconPosition,
+				outer(right + st::historySendStatePosition.x(), icon));
+		}
 		right -= st::historySendStateSpace;
 	}
 

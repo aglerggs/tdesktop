@@ -187,6 +187,9 @@ private:
 	Direction _direction;
 	anim::value _shift;
 	Ui::Animations::Basic _shiftAnimation;
+	// Liquid glass: the popup floats in from the nearest screen edge.
+	Ui::Animations::Simple _slideIn;
+	[[nodiscard]] int slideOffset() const;
 
 };
 

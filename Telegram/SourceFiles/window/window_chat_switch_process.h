@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "ui/round_rect.h"
+#include "ui/effects/animations.h"
+#include "ui/effects/liquid_glass.h"
 #include "ui/userpic_view.h"
 
 namespace Data {
@@ -66,6 +68,18 @@ private:
 	QRect _outer;
 	QRect _inner;
 	Ui::RoundRect _bg;
+
+	// Liquid glass: the panel is glass over the window snapshot, the
+	// selection is a glossy pill sliding with a spring between chats.
+	void updateSelectionPill(bool animated);
+	[[nodiscard]] QRect selectionTarget() const;
+	std::unique_ptr<Ui::LiquidGlass::Surface> _glass;
+	QImage _glassSnapshot;
+	QRect _glassSnapshotRect;
+	QRectF _pillFrom;
+	QRectF _pillTo;
+	Ui::Animations::Simple _pillAnimation;
+	Ui::Animations::Simple _appearAnimation;
 
 	base::flat_map<not_null<PeerData*>, Ui::PeerUserpicView> _userpics;
 	std::vector<not_null<Data::Thread*>> _list;

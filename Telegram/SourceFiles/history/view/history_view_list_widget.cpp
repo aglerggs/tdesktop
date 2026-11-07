@@ -78,6 +78,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_theme.h"
 #include "ui/chat/chat_style.h"
 #include "ui/painter.h"
+#include "ui/effects/liquid_glass.h"
 #include "ui/power_saving.h"
 #include "ui/rect.h"
 #include "ui/screen_reader_mode.h"
@@ -3156,6 +3157,7 @@ void ListWidget::startItemRevealAnimations() {
 					1.,
 					reveal ? reveal->duration : st::itemRevealDuration,
 					reveal ? anim::linear : anim::easeOutQuint);
+				glassAppearStart(view, reveal.has_value());
 				if (view->data()->out()) {
 					_delegate->listChatTheme()->rotateComplexGradientBackground();
 				}
@@ -3207,6 +3209,124 @@ void ListWidget::showPremiumStickerTooltip(
 			_delegate->listShowPremiumToast(document);
 		}
 	}
+}
+
+namespace {
+
+constexpr auto kGlassAppearIn = crl::time(520);
+constexpr auto kGlassShineDelay = crl::time(380);
+constexpr auto kGlassShineDuration = crl::time(700);
+constexpr auto kGlassAppearTotal = kGlassShineDelay + kGlassShineDuration;
+
+[[nodiscard]] float64 GlassSpring(float64 t) {
+	// Critically underdamped: 0 -> overshoot ~6% -> 1.
+	return (t >= 1.)
+		? 1.
+		: (1. - std::exp(-6.5 * t) * std::cos(9. * t));
+}
+
+} // namespace
+
+void ListWidget::glassAppearStart(not_null<Element*> view, bool flight) {
+	if (!Ui::LiquidGlass::Enabled()) {
+		return;
+	}
+	_glassAppear[view->data()->fullId()] = GlassAppear{
+		.start = crl::now(),
+		.out = view->data()->out(),
+		.flight = flight,
+	};
+	if (!_glassAppearTicker.animating()) {
+		_glassAppearTicker.init([=] { glassAppearStep(); });
+		_glassAppearTicker.start();
+	}
+}
+
+void ListWidget::glassAppearStep() {
+	const auto now = crl::now();
+	for (auto i = begin(_glassAppear); i != end(_glassAppear);) {
+		if (now - i->second.start >= kGlassAppearTotal) {
+			i = _glassAppear.erase(i);
+		} else {
+			++i;
+		}
+	}
+	if (_glassAppear.empty()) {
+		_glassAppearTicker.stop();
+	}
+	update();
+}
+
+bool ListWidget::glassAppearPaint(
+		Painter &p,
+		not_null<Element*> view,
+		const Fn<void()> &draw) {
+	if (_glassAppear.empty()) {
+		return false;
+	}
+	const auto i = _glassAppear.find(view->data()->fullId());
+	if (i == end(_glassAppear)) {
+		return false;
+	}
+	const auto &appear = i->second;
+	const auto elapsed = crl::now() - appear.start;
+	const auto t = std::clamp(elapsed / float64(kGlassAppearIn), 0., 1.);
+	const auto spring = GlassSpring(t);
+	const auto inner = view->innerGeometry();
+	const auto height = view->height();
+
+	p.save();
+	if (!appear.flight && t < 1.) {
+		if (appear.out) {
+			// Out of the compose capsule: from below, slim and small,
+			// stretching into the bubble shape with a springy landing.
+			const auto distance = std::max(
+				_visibleBottom - (itemTop(view) + height),
+				0) + height;
+			const auto origin = QPointF(inner.x() + inner.width(), height);
+			p.translate(0, distance * (1. - spring));
+			p.translate(origin);
+			p.scale(0.82 + 0.18 * spring, 0.6 + 0.4 * spring);
+			p.translate(-origin);
+		} else {
+			// Incoming: rises softly from below with a small bounce.
+			const auto origin = QPointF(inner.x(), height);
+			p.translate(0, 22. * (1. - spring));
+			p.translate(origin);
+			const auto scale = 0.92 + 0.08 * spring;
+			p.scale(scale, scale);
+			p.translate(-origin);
+		}
+		p.setOpacity(std::min(1., t * 3.));
+	}
+	draw();
+
+	// A glass shine runs once over a freshly sent bubble.
+	const auto shine = (elapsed - kGlassShineDelay)
+		/ float64(kGlassShineDuration);
+	if (appear.out && shine > 0. && shine < 1. && !inner.isEmpty()) {
+		const auto radius = float64(st::bubbleRadiusLarge);
+		auto path = QPainterPath();
+		path.addRoundedRect(QRectF(inner), radius, radius);
+		const auto band = inner.height() * 1.2 + 40.;
+		const auto x = inner.x() - band
+			+ (inner.width() + 2 * band) * anim::easeOutCirc(1., shine);
+		auto gradient = QLinearGradient(
+			QPointF(x, inner.y()),
+			QPointF(x + band, inner.y() + inner.height()));
+		const auto alpha = int(std::round(
+			110 * std::sin(shine * M_PI)));
+		gradient.setColorAt(0., QColor(255, 255, 255, 0));
+		gradient.setColorAt(0.5, QColor(255, 255, 255, alpha));
+		gradient.setColorAt(1., QColor(255, 255, 255, 0));
+		auto hq = PainterHighQualityEnabler(p);
+		p.setOpacity(1.);
+		p.setPen(Qt::NoPen);
+		p.setBrush(gradient);
+		p.drawPath(path);
+	}
+	p.restore();
+	return true;
 }
 
 void ListWidget::revealItemsCallback() {
@@ -3563,7 +3683,9 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 			context.fullMessageSelected = selection.fullMessageSelected;
 			context.messageSelection = selection.messageSelection;
 			context.highlight = _highlighter.state(item);
-			view->draw(p, context);
+			if (!glassAppearPaint(p, view, [&] { view->draw(p, context); })) {
+				view->draw(p, context);
+			}
 		}
 		if (_translateTracker) {
 			_translateTracker->add(view);

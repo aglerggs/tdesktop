@@ -903,6 +903,19 @@ void SetupLiquidGlass(
 		});
 
 	Ui::AddSkip(container);
+	const auto intro = container->add(
+		object_ptr<Ui::Checkbox>(
+			container,
+			u"Заставка при запуске"_q,
+			CurrentSettings().intro,
+			st::settingsCheckbox),
+		st::settingsCheckboxPadding);
+	intro->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		auto settings = CurrentSettings();
+		settings.intro = checked;
+		SetSettings(settings);
+	}, intro->lifetime());
 	const auto keepDeleted = container->add(
 		object_ptr<Ui::Checkbox>(
 			container,
