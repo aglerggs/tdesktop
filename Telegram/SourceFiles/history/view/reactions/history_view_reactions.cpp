@@ -35,6 +35,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace HistoryView::Reactions {
 namespace {
 
+constexpr auto kBounceDuration = crl::time(520);
+
 constexpr auto kInNonChosenOpacity = 0.12;
 constexpr auto kOutNonChosenOpacity = 0.18;
 constexpr auto kMaxRecentUserpics = 3;
@@ -84,6 +86,7 @@ struct InlineList::Button {
 	mutable QImage image;
 	mutable ClickHandlerPtr link;
 	mutable std::unique_ptr<Ui::Text::CustomEmoji> custom;
+	mutable crl::time bounceStart = 0;
 	std::unique_ptr<Userpics> userpics;
 	ReactionId id;
 	QString text;
@@ -476,6 +479,30 @@ void InlineList::paint(
 		}
 		const auto animating = (button.animation != nullptr);
 		const auto &geometry = button.geometry;
+
+		// Liquid glass fork: a chosen reaction pops with a springy bounce.
+		auto bounced = false;
+		if (button.bounceStart) {
+			const auto now = context.now ? context.now : crl::now();
+			const auto t = (now - button.bounceStart) / float64(kBounceDuration);
+			if (t >= 1. || t < 0.) {
+				button.bounceStart = 0;
+			} else {
+				const auto scale = 1.
+					+ 0.22 * std::exp(-5. * t) * std::sin(13. * t);
+				const auto center = QRectF(geometry).center();
+				p.save();
+				p.translate(center);
+				p.scale(scale, scale);
+				p.translate(-center);
+				bounced = true;
+			}
+		}
+		const auto restoreBounce = gsl::finally([&] {
+			if (bounced) {
+				p.restore();
+			}
+		});
 		const auto mine = button.chosen;
 		const auto withoutMine = button.count - (mine ? 1 : 0);
 		const auto skipImage = animating
@@ -827,6 +854,7 @@ void InlineList::animate(
 		std::move(args),
 		std::move(repaint),
 		st::reactionInlineImage);
+	i->bounceStart = crl::now();
 }
 
 void InlineList::resolveUserpicsImage(const Button &button) const {

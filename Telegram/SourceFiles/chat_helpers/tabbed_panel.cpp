@@ -10,6 +10,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 #include "ui/image/image_prepare.h"
 #include "ui/ui_utility.h"
+#include "ui/painter.h"
+#include "ui/rp_widget.h"
+#include "ui/effects/liquid_glass.h"
+
+#include <QtGui/QPainterPath>
 #include "chat_helpers/tabbed_selector.h"
 #include "window/window_session_controller.h"
 #include "main/main_session.h"
@@ -100,6 +105,45 @@ TabbedPanel::TabbedPanel(
 
 	_selector->resize(st::emojiPanWidth, _contentHeight);
 	_selector->move(innerRect().topLeft());
+
+	if (Ui::LiquidGlass::Enabled()) {
+		// Liquid glass: a glossy rim and a soft top highlight over the panel.
+		const auto rim = Ui::CreateChild<Ui::RpWidget>(this);
+		rim->setAttribute(Qt::WA_TransparentForMouseEvents);
+		_selector->geometryValue(
+		) | rpl::on_next([=](QRect geometry) {
+			rim->setGeometry(geometry);
+			rim->raise();
+		}, rim->lifetime());
+		rim->paintRequest(
+		) | rpl::on_next([=] {
+			auto p = QPainter(rim);
+			auto hq = PainterHighQualityEnabler(p);
+			const auto dark = (st::emojiPanBg->c.lightnessF() < 0.5);
+			const auto radius = float64(st::emojiPanRadius);
+			const auto full = QRectF(rim->rect()).marginsRemoved(
+				{ 0.5, 0.5, 0.5, 0.5 });
+			auto path = QPainterPath();
+			path.addRoundedRect(full, radius, radius);
+			const auto gloss = std::min(full.height(), 44.);
+			auto gradient = QLinearGradient(
+				full.topLeft(),
+				full.topLeft() + QPointF(0, gloss));
+			gradient.setColorAt(0., QColor(255, 255, 255, dark ? 34 : 90));
+			gradient.setColorAt(1., QColor(255, 255, 255, 0));
+			p.setPen(Qt::NoPen);
+			p.setBrush(gradient);
+			p.drawPath(path);
+			auto stroke = QLinearGradient(full.topLeft(), full.bottomLeft());
+			stroke.setColorAt(0., QColor(255, 255, 255, dark ? 90 : 220));
+			stroke.setColorAt(0.5, QColor(255, 255, 255, dark ? 28 : 90));
+			stroke.setColorAt(1., QColor(255, 255, 255, dark ? 50 : 150));
+			p.setBrush(Qt::NoBrush);
+			p.setPen(QPen(QBrush(stroke), 1.));
+			p.drawPath(path);
+		}, rim->lifetime());
+		rim->show();
+	}
 
 	_hideTimer.setCallback([this] { hideByTimerOrLeave(); });
 

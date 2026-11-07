@@ -188,10 +188,14 @@ Style MakeStyle(const QColor &base, int radius, RectParts rim) {
 	result.bevel = 16;
 	result.refraction = 1.;
 	result.dispersion = 0.35;
-	result.saturation = dark ? 1.2 : 1.4;
-	result.tint = WithAlphaF(base, dark ? 0.5 : 0.4);
+	result.saturation = dark ? 1.35 : 1.4;
+	// On dark themes a slightly lighter pane with a brighter rim reads as
+	// glass even over a plain dark background.
+	result.tint = WithAlphaF(
+		dark ? base.lighter(130) : base,
+		dark ? 0.45 : 0.4);
 	result.highlight = dark
-		? QColor(255, 255, 255, 64)
+		? QColor(255, 255, 255, 110)
 		: QColor(255, 255, 255, 210);
 	result.shade = dark
 		? QColor(0, 0, 0, 56)

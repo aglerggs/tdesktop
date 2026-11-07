@@ -1,3 +1,67 @@
+diff --git a/ui/effects/panel_animation.cpp b/ui/effects/panel_animation.cpp
+index fd2a4d4..a40a20d 100644
+--- a/ui/effects/panel_animation.cpp
++++ b/ui/effects/panel_animation.cpp
+@@ -6,6 +6,8 @@
+ //
+ #include "ui/effects/panel_animation.h"
+ 
++#include <cmath>
++
+ #include "ui/effects/animation_value.h"
+ #include "ui/widgets/shadow.h"
+ #include "ui/ui_utility.h"
+@@ -311,8 +313,14 @@ void PanelAnimation::start() {
+ 	RoundShadowAnimation::start(_finalWidth, _finalHeight, _finalImage.devicePixelRatio());
+ 	auto checkCorner = [this](const Corner &corner) {
+ 		if (!corner.valid()) return;
+-		if (_startWidth >= 0) Assert(corner.width <= _startWidth);
+-		if (_startHeight >= 0) Assert(corner.height <= _startHeight);
++		// Liquid glass fork: rounder corners may not fit a tiny start size,
++		// start a bit larger instead of failing.
++		if (_startWidth >= 0 && corner.width > _startWidth) {
++			_startWidth = std::min(corner.width, _finalInnerWidth);
++		}
++		if (_startHeight >= 0 && corner.height > _startHeight) {
++			_startHeight = std::min(corner.height, _finalInnerHeight);
++		}
+ 		Assert(corner.width <= _finalInnerWidth);
+ 		Assert(corner.height <= _finalInnerHeight);
+ 	};
+@@ -502,7 +510,32 @@ auto PanelAnimation::paintFrame(
+ 	//	frameInts += _frameIntsPerLineAdded;
+ 	//}
+ 
+-	p.drawImage(style::rtlpoint(x + (outerLeft / pixelRatio), y + (outerTop / pixelRatio), outerWidth), _frame, QRect(outerLeft, outerTop, outerRight - outerLeft, outerBottom - outerTop));
++	const auto target = style::rtlpoint(x + (outerLeft / pixelRatio), y + (outerTop / pixelRatio), outerWidth);
++	const auto source = QRect(outerLeft, outerTop, outerRight - outerLeft, outerBottom - outerTop);
++	// Liquid glass fork: the panel springs out of its corner,
++	// 93% -> ~101% -> 100%, settling exactly when the animation ends.
++	const auto spring = (dt < 1.)
++		? (1. - 0.07 * std::exp(-6. * dt) * std::cos(11. * dt))
++		: 1.;
++	if (spring != 1.) {
++		const auto left = (_origin == Origin::TopLeft)
++			|| (_origin == Origin::BottomLeft);
++		const auto top = (_origin == Origin::TopLeft)
++			|| (_origin == Origin::TopRight);
++		const auto origin = QPointF(style::rtlpoint(
++			x + (left ? _finalInnerLeft : _finalInnerRight) / pixelRatio,
++			y + (top ? _finalInnerTop : _finalInnerBottom) / pixelRatio,
++			outerWidth));
++		p.save();
++		p.setRenderHint(QPainter::SmoothPixmapTransform);
++		p.translate(origin);
++		p.scale(spring, spring);
++		p.translate(-origin);
++		p.drawImage(target, _frame, source);
++		p.restore();
++	} else {
++		p.drawImage(target, _frame, source);
++	}
+ 
+ 	return state;
+ }
 diff --git a/ui/layers/layer_widget.cpp b/ui/layers/layer_widget.cpp
 index f8b1aa6..d9c776d 100644
 --- a/ui/layers/layer_widget.cpp
@@ -36,6 +100,19 @@ index f8b1aa6..d9c776d 100644
  	}
  	if (!_mainMenuCache.isNull() && mainMenuRight > 0) {
  		p.setOpacity(1.);
+diff --git a/ui/layers/layers.style b/ui/layers/layers.style
+index ebb7796..95c5329 100644
+--- a/ui/layers/layers.style
++++ b/ui/layers/layers.style
+@@ -35,7 +35,7 @@ Box {
+ }
+ 
+ boxDuration: 200;
+-boxRadius: 8px;
++boxRadius: 14px;
+ 
+ boxButtonFont: font(boxFontSize semibold);
+ defaultBoxButtonTextStyle: TextStyle(semiboldTextStyle) {
 diff --git a/ui/widgets/side_bar_button.cpp b/ui/widgets/side_bar_button.cpp
 index 7633972..bd19aaf 100644
 --- a/ui/widgets/side_bar_button.cpp
@@ -83,3 +160,19 @@ index 7633972..bd19aaf 100644
  
  	if (_lock.locked) {
  		p.setOpacity(kPremiumLockedOpacity);
+diff --git a/ui/widgets/widgets.style b/ui/widgets/widgets.style
+index 8b8df7d..7b22585 100644
+--- a/ui/widgets/widgets.style
++++ b/ui/widgets/widgets.style
+@@ -992,9 +992,9 @@ defaultPopupMenu: PopupMenu {
+ 
+ 	menu: defaultMenu;
+ 
+-	radius: 8px;
++	radius: 12px;
+ 	duration: 150;
+-	showDuration: 200;
++	showDuration: 320;
+ }
+ 
+ defaultPillTabs: PillTabs {

@@ -135,6 +135,9 @@ void TopControls::updateGlass() {
 	if (_repliesRootView) {
 		_repliesRootView->updateGlass();
 	}
+	if (_translateBar) {
+		_translateBar->updateGlass();
+	}
 }
 
 void TopControls::setGlassBackdrop(
@@ -145,6 +148,9 @@ void TopControls::setGlassBackdrop(
 	}
 	if (_repliesRootView && _glassBackdrop) {
 		_repliesRootView->setGlassBackdrop(_glassBackdrop);
+	}
+	if (_translateBar && _glassBackdrop) {
+		_translateBar->setGlassBackdrop(_glassBackdrop);
 	}
 }
 
@@ -479,6 +485,9 @@ void TopControls::setupTranslateBar() {
 		_topBars.get(),
 		_controller,
 		_history);
+	if (_glassBackdrop) {
+		_translateBar->setGlassBackdrop(_glassBackdrop);
+	}
 	_controller->adaptive().oneColumnValue(
 	) | rpl::on_next([=, raw = _translateBar.get()](bool one) {
 		raw->setShadowGeometryPostprocess([=](QRect geometry) {

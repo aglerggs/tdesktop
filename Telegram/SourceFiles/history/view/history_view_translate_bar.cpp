@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_menu_icons.h"
 
 #include <QtGui/QtEvents>
@@ -263,12 +264,41 @@ void TranslateBar::setShadowGeometryPostprocess(
 	updateShadowGeometry(_wrap.geometry());
 }
 
+void TranslateBar::setGlassBackdrop(
+		Ui::LiquidGlass::BackdropProvider provider) {
+	if (!Ui::LiquidGlass::Enabled() || !provider) {
+		return;
+	}
+	_glassBackdrop = std::move(provider);
+	if (!_glass) {
+		_glass = std::make_unique<Ui::LiquidGlass::Surface>();
+		const auto refresh = [=] {
+			_glass->setStyle(Ui::LiquidGlass::MakeStyle(
+				st::historyComposeButtonBg->c,
+				st::historyPinnedGlassRadius));
+			_wrap.entity()->update();
+		};
+		refresh();
+		style::PaletteChanged(
+		) | rpl::on_next(refresh, _wrap.lifetime());
+	}
+	_wrap.entity()->setAttribute(Qt::WA_OpaquePaintEvent, false);
+	updateShadowGeometry(_wrap.geometry());
+	_wrap.entity()->update();
+}
+
+void TranslateBar::updateGlass() {
+	if (_glass) {
+		_wrap.entity()->update();
+	}
+}
+
 void TranslateBar::updateShadowGeometry(QRect wrapGeometry) {
 	const auto regular = QRect(
 		wrapGeometry.x(),
 		wrapGeometry.y() + wrapGeometry.height(),
 		wrapGeometry.width(),
-		st::lineWidth);
+		_glass ? 0 : st::lineWidth);
 	_shadow->setGeometry(_shadowGeometryPostprocess
 		? _shadowGeometryPostprocess(regular)
 		: regular);
@@ -292,7 +322,22 @@ void TranslateBar::setup(not_null<History*> history) {
 
 	button->paintRequest(
 	) | rpl::on_next([=](QRect clip) {
-		QPainter(button).fillRect(clip, st::historyComposeButtonBg);
+		auto p = QPainter(button);
+		if (!_glass || !_glassBackdrop) {
+			p.fillRect(clip, st::historyComposeButtonBg);
+			return;
+		}
+		const auto shape = button->rect().marginsRemoved(
+			st::historyPinnedGlassMargins);
+		if (shape.isEmpty()) {
+			return;
+		}
+		const auto margin = _glass->backdropMargin();
+		const auto global = button->mapToGlobal(QPoint());
+		auto backdrop = _glassBackdrop(shape.marginsAdded(
+			{ margin, margin, margin, margin }).translated(global));
+		backdrop.rect.translate(-global);
+		_glass->paint(p, shape, backdrop);
 	}, button->lifetime());
 
 	button->setClickedCallback([=] {

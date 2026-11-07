@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "ui/wrap/slide_wrap.h"
+#include "ui/effects/liquid_glass.h"
 #include "spellcheck/spellcheck_types.h"
 
 class History;
@@ -40,6 +41,10 @@ public:
 
 	void setShadowGeometryPostprocess(Fn<QRect(QRect)> postprocess);
 
+	// Liquid glass: a floating capsule, the provider takes global coords.
+	void setGlassBackdrop(Ui::LiquidGlass::BackdropProvider provider);
+	void updateGlass();
+
 	void move(int x, int y);
 	void resizeToWidth(int width);
 	[[nodiscard]] int height() const;
@@ -68,6 +73,8 @@ private:
 	Ui::SlideWrap<> _wrap;
 	std::unique_ptr<Ui::PlainShadow> _shadow;
 	Fn<QRect(QRect)> _shadowGeometryPostprocess;
+	Ui::LiquidGlass::BackdropProvider _glassBackdrop;
+	std::unique_ptr<Ui::LiquidGlass::Surface> _glass;
 	base::unique_qptr<Ui::PopupMenu> _menu;
 	rpl::variable<LanguageId> _overridenTo;
 	rpl::variable<LanguageId> _to;
