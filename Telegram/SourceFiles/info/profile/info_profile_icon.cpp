@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/effects/liquid_glass.h"
 #include "ui/painter.h"
+#include "styles/style_info.h"
 
 namespace Info {
 namespace Profile {
@@ -17,19 +18,26 @@ namespace {
 constexpr auto kGlassIconPadding = 5;
 
 [[nodiscard]] QColor GlassIconColor(const style::icon *icon) {
-	// Liquid glass: each kind of icon gets its own bright tile color.
-	static const auto colors = std::array<QColor, 8>{ {
-		QColor(0x3D, 0x8B, 0xFD),
-		QColor(0x34, 0xC7, 0x59),
-		QColor(0xFF, 0x95, 0x00),
-		QColor(0xFF, 0x3B, 0x30),
-		QColor(0xAF, 0x52, 0xDE),
-		QColor(0x30, 0xB0, 0xC7),
-		QColor(0xFF, 0x2D, 0x55),
-		QColor(0x58, 0x56, 0xD6),
-	} };
-	const auto hash = std::hash<const void*>()(icon);
-	return colors[(hash >> 4) % colors.size()];
+	// Liquid glass: calm tinted tiles, the color follows the meaning.
+	const auto is = [&](const style::icon &other) {
+		return (icon == &other);
+	};
+	if (is(st::infoIconMediaPhoto) || is(st::infoIconMediaStories)) {
+		return QColor(0x4C, 0x9A, 0xFF);
+	} else if (is(st::infoIconMediaVideo) || is(st::infoIconMediaGif)) {
+		return QColor(0x8E, 0x7C, 0xFF);
+	} else if (is(st::infoIconMediaFile) || is(st::infoIconMediaSaved)) {
+		return QColor(0xFF, 0xA9, 0x3D);
+	} else if (is(st::infoIconMediaAudio) || is(st::infoIconMediaVoice)) {
+		return QColor(0x3D, 0xD6, 0x8C);
+	} else if (is(st::infoIconMediaLink)) {
+		return QColor(0x3D, 0xC8, 0xE0);
+	} else if (is(st::infoIconMediaGifts)) {
+		return QColor(0xFF, 0x6B, 0x9A);
+	} else if (is(st::infoIconDeleteRed) || is(st::infoIconBlock)) {
+		return st::attentionButtonFg->c;
+	}
+	return st::windowActiveTextFg->c;
 }
 
 } // namespace
@@ -77,20 +85,14 @@ void FloatingIcon::paintEvent(QPaintEvent *e) {
 	const auto color = GlassIconColor(_icon);
 	{
 		auto hq = PainterHighQualityEnabler(p);
-		const auto radius = std::min(tile.width(), tile.height()) * 0.28;
-		auto fill = QLinearGradient(tile.topLeft(), tile.bottomLeft());
-		fill.setColorAt(0., color.lighter(118));
-		fill.setColorAt(1., color);
+		const auto radius = std::min(tile.width(), tile.height()) * 0.3;
+		auto fill = color;
+		fill.setAlphaF(st::windowBg->c.lightnessF() < 0.5 ? 0.17 : 0.13);
 		p.setPen(Qt::NoPen);
 		p.setBrush(fill);
 		p.drawRoundedRect(tile, radius, radius);
-		auto gloss = QLinearGradient(tile.topLeft(), tile.bottomLeft());
-		gloss.setColorAt(0., QColor(255, 255, 255, 70));
-		gloss.setColorAt(0.5, QColor(255, 255, 255, 0));
-		p.setBrush(gloss);
-		p.drawRoundedRect(tile, radius, radius);
 	}
-	_icon->paint(p, _point, width(), QColor(255, 255, 255));
+	_icon->paint(p, _point, width(), color);
 }
 
 } // namespace Profile
