@@ -67,11 +67,17 @@ QString WebSocketSocket::EndpointAddress(int16 protocolDcId) {
 	if (parsed.test) {
 		return QString();
 	}
-	// The web endpoints known to accept the WebSocket transport,
-	// the same defaults as in tg-ws-proxy.
+	// The web frontend serves every kwsN.web.telegram.org host (chosen by
+	// the TLS name), so try it for all the main data centers: stickers and
+	// media often live on DC 1, 3 and 5, which can be unreachable by TCP.
+	// It races with the usual connections, a failure costs nothing.
 	switch (parsed.dcId) {
+	case 1:
 	case 2:
-	case 4: return u"149.154.167.220"_q;
+	case 3:
+	case 4:
+	case 5:
+	case 203: return u"149.154.167.220"_q;
 	}
 	return QString();
 }

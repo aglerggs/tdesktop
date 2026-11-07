@@ -208,6 +208,7 @@ protected:
 private:
 	void tick();
 	void layoutWelcome();
+	void fillChats();
 	void skipSplash();
 	void hideAnimated(Fn<void()> done = nullptr);
 	[[nodiscard]] crl::time elapsed() const;
@@ -217,6 +218,7 @@ private:
 	const not_null<SessionController*> _controller;
 	const QImage _creation;
 	const QImage _welcome;
+	QImage _welcomeBlurred;
 	crl::time _started = 0;
 	crl::time _skipShift = 0;
 	crl::time _hideStarted = 0;
@@ -236,8 +238,26 @@ Intro::Intro(QWidget *parent, not_null<SessionController*> controller)
 	setFocusPolicy(Qt::StrongFocus);
 	setAttribute(Qt::WA_OpaquePaintEvent, false);
 
+	_enter = Ui::CreateChild<EnterButton>(this);
+	_enter->setClickedCallback([=] { hideAnimated(); });
+
+	sizeValue() | rpl::on_next([=] {
+		layoutWelcome();
+	}, lifetime());
+
+	_started = crl::now();
+	_ticker.start();
+	setFocus();
+}
+
+void Intro::fillChats() {
+	// The chats list may load only after the window appears,
+	// so the buttons are made when the welcome screen starts.
+	if (!_chats.empty()) {
+		return;
+	}
 	auto added = 0;
-	const auto list = controller->session().data().chatsList()->indexed();
+	const auto list = _controller->session().data().chatsList()->indexed();
 	for (const auto &row : *list) {
 		if (added >= kChatsCount) {
 			break;
@@ -253,20 +273,12 @@ Intro::Intro(QWidget *parent, not_null<SessionController*> controller)
 					}
 				});
 			});
+			button->show();
 			_chats.push_back(button);
 			++added;
 		}
 	}
-	_enter = Ui::CreateChild<EnterButton>(this);
-	_enter->setClickedCallback([=] { hideAnimated(); });
-
-	sizeValue() | rpl::on_next([=] {
-		layoutWelcome();
-	}, lifetime());
-
-	_started = crl::now();
-	_ticker.start();
-	setFocus();
+	layoutWelcome();
 }
 
 crl::time Intro::elapsed() const {
@@ -312,6 +324,9 @@ void Intro::tick() {
 	}
 	const auto now = elapsed();
 	const auto welcome = (now - kWelcomeStart) / 1000.;
+	if (welcome > 0. && welcome < 2.5) {
+		fillChats();
+	}
 	const auto index = std::max(0, int(_chats.size()));
 	for (auto i = 0; i != index; ++i) {
 		const auto t = (welcome - 0.55 - i * 0.07) / 0.6;
@@ -393,16 +408,46 @@ void Intro::paintWelcome(QPainter &p, crl::time now) {
 	const auto t = (now - kWelcomeStart) / 1000.;
 	if (!_welcome.isNull()) {
 		const auto area = QSizeF(size());
-		const auto cover = CoverRect(QSizeF(_welcome.size()), area);
-		// Slow breathing zoom on the portrait.
-		const auto scale = 1.08 - 0.06 * std::min(1., t / 6.);
-		const auto center = QPointF(area.width() / 2., area.height() * 0.4);
 		p.save();
 		p.setRenderHint(QPainter::SmoothPixmapTransform);
-		p.translate(center);
-		p.scale(scale, scale);
-		p.translate(-center);
-		p.drawImage(cover, _welcome);
+		// Blurred, darkened copy fills the whole window...
+		if (_welcomeBlurred.isNull()) {
+			auto small = _welcome.scaled(
+				QSize(48, 48),
+				Qt::KeepAspectRatio,
+				Qt::SmoothTransformation);
+			_welcomeBlurred = small.scaled(
+				small.size() * 8,
+				Qt::IgnoreAspectRatio,
+				Qt::SmoothTransformation);
+		}
+		p.drawImage(
+			CoverRect(QSizeF(_welcomeBlurred.size()), area),
+			_welcomeBlurred);
+		p.fillRect(rect(), QColor(0, 0, 0, 120));
+		// ...and the whole portrait stands in the middle, breathing slowly.
+		const auto scale = 1.04 - 0.04 * std::min(1., t / 6.);
+		const auto source = QSizeF(_welcome.size());
+		const auto fit = std::min(
+			area.width() / source.width(),
+			area.height() / source.height());
+		const auto size = source * fit * scale;
+		const auto target = QRectF(
+			QPointF(
+				(area.width() - size.width()) / 2.,
+				(area.height() - size.height()) / 2.),
+			size);
+		p.drawImage(target, _welcome);
+		// Soft side edges into the blurred background.
+		const auto edge = std::min(target.width() * 0.18, 140.);
+		auto left = QLinearGradient(target.left(), 0, target.left() + edge, 0);
+		left.setColorAt(0., QColor(0, 0, 0, 160));
+		left.setColorAt(1., QColor(0, 0, 0, 0));
+		p.fillRect(QRectF(target.left(), 0, edge, area.height()), left);
+		auto right = QLinearGradient(target.right(), 0, target.right() - edge, 0);
+		right.setColorAt(0., QColor(0, 0, 0, 160));
+		right.setColorAt(1., QColor(0, 0, 0, 0));
+		p.fillRect(QRectF(target.right() - edge, 0, edge, area.height()), right);
 		p.restore();
 	}
 	auto shade = QLinearGradient(0, 0, 0, height());
