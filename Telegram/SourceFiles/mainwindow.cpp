@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/effects/liquid_glass.h"
 #include "window/window_liquid_intro.h"
+#include "window/window_liquid_features.h"
 
 #include "data/data_document.h"
 #include "data/data_session.h"
@@ -363,6 +364,7 @@ void MainWindow::setupMain(
 	if (const auto strong = weakAnimatedLayer.get()) {
 		strong->hideAllAnimatedRun();
 	}
+	Window::Liquid::Start(sessionController());
 	// Liquid glass fork: the startup splash, once per launch.
 	static auto introShown = false;
 	if (!introShown

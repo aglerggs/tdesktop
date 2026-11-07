@@ -63,6 +63,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "ui/effects/liquid_glass.h"
 #include "data/data_saved_deleted.h"
+#include "data/data_liquid_store.h"
+#include "window/window_liquid_features.h"
 #include "ui/widgets/continuous_sliders.h"
 
 #include <QtWidgets/QApplication>
@@ -902,6 +904,57 @@ void SetupLiquidGlass(
 			SetSettings(settings);
 		});
 
+	Ui::AddSkip(container);
+	const auto addLiquidButton = [&](const QString &text, Fn<void()> callback) {
+		const auto button = container->add(object_ptr<Ui::SettingsButton>(
+			container,
+			rpl::single(text),
+			st::settingsButtonNoIcon));
+		button->setClickedCallback(std::move(callback));
+	};
+	addLiquidButton(u"Шаблоны текста (;имя)"_q, [=] {
+		Window::Liquid::ShowTemplatesBox(controller);
+	});
+	addLiquidButton(u"Ночная тема по закату"_q, [=] {
+		Window::Liquid::ShowSunsetBox(controller);
+	});
+	{
+		const auto languages = std::vector<std::pair<QString, QString>>{
+			{ u"en"_q, u"английский"_q },
+			{ u"uk"_q, u"украинский"_q },
+			{ u"de"_q, u"немецкий"_q },
+			{ u"nl"_q, u"нидерландский"_q },
+			{ u"no"_q, u"норвежский"_q },
+			{ u"ja"_q, u"японский"_q },
+			{ u"ru"_q, u"русский"_q },
+		};
+		const auto label = [=] {
+			const auto code = Data::LiquidStore::TranslateTo();
+			for (const auto &[c, name] : languages) {
+				if (c == code) {
+					return u"Перевод при наборе (Ctrl+Shift+T): "_q + name;
+				}
+			}
+			return u"Перевод при наборе (Ctrl+Shift+T): "_q + code;
+		};
+		const auto text = std::make_shared<rpl::variable<QString>>(label());
+		const auto button = container->add(object_ptr<Ui::SettingsButton>(
+			container,
+			text->value(),
+			st::settingsButtonNoIcon));
+		button->setClickedCallback([=] {
+			const auto code = Data::LiquidStore::TranslateTo();
+			auto index = 0;
+			for (auto i = 0; i != int(languages.size()); ++i) {
+				if (languages[i].first == code) {
+					index = i;
+				}
+			}
+			const auto next = languages[(index + 1) % languages.size()].first;
+			Data::LiquidStore::SetTranslateTo(next);
+			*text = label();
+		});
+	}
 	Ui::AddSkip(container);
 	const auto intro = container->add(
 		object_ptr<Ui::Checkbox>(

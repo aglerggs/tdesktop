@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_peer_menu.h"
 
 #include "data/data_saved_deleted.h"
+#include "window/window_liquid_features.h"
 
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
@@ -333,6 +334,7 @@ private:
 	void addToggleTopicClosed();
 	void addExportChat();
 	void addSavedDeleted();
+	void addLiquidFeatures();
 	void addTranslate();
 	void addReport();
 	void addNewContact();
@@ -1093,6 +1095,28 @@ void Filler::addSavedDeleted() {
 		u"Удалённые сообщения"_q,
 		[=] { Data::SavedDeleted::ShowDeletedBox(controller, peer); },
 		&st::menuIconDelete);
+}
+
+void Filler::addLiquidFeatures() {
+	if (_thread->asTopic()) {
+		return;
+	}
+	const auto peer = _peer;
+	const auto controller = _controller;
+	const auto history = peer->owner().history(peer);
+	const auto thread = _thread;
+	_addAction(u"Заметка о чате"_q, [=] {
+		Window::Liquid::ShowNoteBox(controller, peer);
+	}, &st::menuIconEdit);
+	_addAction(u"Статистика переписки"_q, [=] {
+		Window::Liquid::ShowStatsBox(controller, history);
+	}, &st::menuIconStats);
+	_addAction(u"Поиск по тексту на фото"_q, [=] {
+		Window::Liquid::ShowPhotoTextSearch(controller, history);
+	}, &st::menuIconSearch);
+	_addAction(u"Открыть рядом"_q, [=] {
+		Window::Liquid::OpenSideBySide(controller, thread);
+	}, &st::menuIconNewWindow);
 }
 
 void Filler::addTranslate() {
@@ -1966,6 +1990,7 @@ void Filler::fillHistoryActions() {
 	addDirectMessages();
 	addExportChat();
 	addSavedDeleted();
+	addLiquidFeatures();
 	addTranslate();
 	addReport();
 	addClearHistory();

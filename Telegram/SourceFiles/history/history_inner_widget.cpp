@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
 
+#include "window/window_liquid_features.h"
+
 #include "data/data_saved_deleted.h"
 
 #include "api/api_polls.h"
@@ -4041,6 +4043,22 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	const auto reactItem = Element::Hovered()
 		? Element::Hovered()->data().get()
 		: nullptr;
+	if (_menu) {
+		// Liquid glass fork: reminders, quotes and downloads.
+		const auto active = ClickHandler::getActive();
+		auto selected = std::vector<not_null<HistoryItem*>>();
+		for (const auto &id : getSelectedItems()) {
+			if (const auto item = controller->session().data().message(id)) {
+				selected.push_back(item);
+			}
+		}
+		Window::Liquid::FillMessageMenu(
+			_menu.get(),
+			controller,
+			reactItem,
+			std::move(selected),
+			active ? active->url() : QString());
+	}
 	const auto attached = reactItem
 		? AttachSelectorToMenu(
 			_menu.get(),

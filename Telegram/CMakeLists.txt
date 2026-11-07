@@ -813,6 +813,8 @@ PRIVATE
     data/data_search_controller.h
     data/data_send_action.cpp
     data/data_send_action.h
+    data/data_liquid_store.cpp
+    data/data_liquid_store.h
     data/data_saved_deleted.cpp
     data/data_saved_deleted.h
     data/data_session.cpp
@@ -2544,6 +2546,8 @@ PRIVATE
     window/window_filters_menu.h
     window/window_history_hider.cpp
     window/window_history_hider.h
+    window/window_liquid_features.cpp
+    window/window_liquid_features.h
     window/window_liquid_intro.cpp
     window/window_liquid_intro.h
     window/window_lock_widgets.cpp

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_actions.h"
 
+#include "data/data_liquid_store.h"
+
 #include "api/api_blocked_peers.h"
 #include "api/api_chat_participants.h"
 #include "api/api_credits.h"
@@ -1675,6 +1677,17 @@ Section DetailsFiller::makeInfo() {
 				}
 			});
 	};
+	{
+		// Liquid glass fork: the private note about this chat.
+		addInfoLine(
+			rpl::single(u"Заметка"_q),
+			Data::LiquidStore::NoteValue(
+				&_peer->session(),
+				_peer->id
+			) | rpl::map([](const QString &text) {
+				return TextWithEntities{ text };
+			}));
+	}
 	if (const auto user = _peer->asUser()) {
 		if (user->session().supportMode()) {
 			addInfoLineGeneric(

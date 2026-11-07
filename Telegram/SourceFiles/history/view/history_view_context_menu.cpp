@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_context_menu.h"
 
+#include "window/window_liquid_features.h"
+
 #include "api/api_attached_stickers.h"
 #include "api/api_editing.h"
 #include "api/api_global_privacy.h"
@@ -1980,6 +1982,23 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 
 	// Build the full message menu.
 	FillContextMenuItems(result, list, request, hasPollOption);
+
+	// Liquid glass fork: reminders, quotes and downloads.
+	{
+		const auto owner = &list->controller()->session().data();
+		auto selected = std::vector<not_null<HistoryItem*>>();
+		for (const auto &entry : list->getSelectedItems()) {
+			if (const auto message = owner->message(entry.msgId)) {
+				selected.push_back(message);
+			}
+		}
+		Window::Liquid::FillMessageMenu(
+			result.get(),
+			list->controller(),
+			item,
+			std::move(selected),
+			link ? link->url() : QString());
+	}
 
 	if (item) {
 		const auto media = item->media();

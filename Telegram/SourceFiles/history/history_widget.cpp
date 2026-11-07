@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
 
+#include "window/window_liquid_features.h"
+
 #include "api/api_compose_with_ai.h"
 #include "api/api_editing.h"
 #include "api/api_bot.h"
@@ -486,6 +488,9 @@ HistoryWidget::HistoryWidget(
 	setupGiftToChannelButton();
 	setupDirectMessageButton();
 	_reportMessages->addClickHandler([=] { reportSelectedMessages(); });
+	Window::Liquid::SetupFieldFeatures(_field, [=] {
+		return controller.get();
+	});
 	_field->submits(
 	) | rpl::on_next([=](Qt::KeyboardModifiers modifiers) {
 		sendWithModifiers(modifiers);

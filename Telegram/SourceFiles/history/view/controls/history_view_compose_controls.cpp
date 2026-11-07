@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/controls/history_view_compose_controls.h"
 
+#include "window/window_liquid_features.h"
+
 #include "history/view/controls/history_view_bot_menu_button.h"
 
 #include "base/call_delayed.h"
@@ -3234,6 +3236,9 @@ void ComposeControls::initKeyHandler() {
 
 void ComposeControls::initField() {
 	_field->setMaxHeight(st::historyComposeFieldMaxHeight);
+	Window::Liquid::SetupFieldFeatures(_field, [show = _show] {
+		return show->resolveWindow();
+	});
 	updateSubmitSettings();
 	_field->submits(
 	) | rpl::on_next([=](Qt::KeyboardModifiers modifiers) {
