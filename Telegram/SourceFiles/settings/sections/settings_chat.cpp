@@ -65,6 +65,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_saved_deleted.h"
 #include "data/data_liquid_store.h"
 #include "window/window_liquid_features.h"
+#include "window/window_liquid_updates.h"
 #include "ui/widgets/continuous_sliders.h"
 
 #include <QtWidgets/QApplication>
@@ -912,6 +913,22 @@ void SetupLiquidGlass(
 			st::settingsButtonNoIcon));
 		button->setClickedCallback(std::move(callback));
 	};
+	addLiquidButton(u"Живые обои"_q, [=] {
+		Window::Liquid::ShowLiveWallpaperBox(controller);
+	});
+	addLiquidButton(u"История обновлений"_q, [=] {
+		Window::Liquid::ShowPatchHistory(controller);
+	});
+	addLiquidButton(u"Проверить обновления (версия "_q
+			+ Window::Liquid::CurrentVersion() + ')', [=] {
+		Window::Liquid::CheckForUpdates(controller, true);
+	});
+	addLiquidButton(u"Резервная копия: сохранить"_q, [=] {
+		Window::Liquid::ExportBackup(controller);
+	});
+	addLiquidButton(u"Восстановить из копии"_q, [=] {
+		Window::Liquid::ImportBackup(controller);
+	});
 	addLiquidButton(u"Шаблоны текста (;имя)"_q, [=] {
 		Window::Liquid::ShowTemplatesBox(controller);
 	});

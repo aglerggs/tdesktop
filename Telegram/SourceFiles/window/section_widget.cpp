@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/section_widget.h"
 
+#include "window/window_liquid_updates.h"
+
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "ui/ui_utility.h"
@@ -394,6 +396,9 @@ void SectionWidget::PaintBackground(
 		QSize fill,
 		QRect clip,
 		bool paused) {
+	if (Window::Liquid::PaintLiveWallpaper(p, fill, clip)) {
+		return;
+	}
 	const auto &background = theme->background();
 	if (background.colorForFill) {
 		p.fillRect(clip, *background.colorForFill);

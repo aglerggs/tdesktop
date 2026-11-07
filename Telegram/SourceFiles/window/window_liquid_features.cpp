@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_liquid_features.h"
 
+#include "window/window_liquid_updates.h"
+
 #include "api/api_common.h"
 #include "apiwrap.h"
 #include "base/timer.h"
@@ -458,7 +460,7 @@ struct Stats {
 	p.drawText(
 		QRect(0, total - kPadding + 6, kWidth - kPadding, 20),
 		Qt::AlignRight | Qt::AlignVCenter,
-		u"Liquid Glass Telegram"_q);
+		u"aglergram"_q);
 	p.end();
 	return result;
 }
@@ -521,6 +523,7 @@ void Start(not_null<SessionController*> controller) {
 		return;
 	}
 	started = true;
+	StartUpdates(controller);
 	static auto timer = base::Timer([] {
 		CheckReminders();
 		CheckSunset();

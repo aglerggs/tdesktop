@@ -1,4 +1,4 @@
-name: Liquid Glass (Windows x64)
+name: aglergram (Windows x64)
 
 # Builds the fork for Windows x64 and uploads Telegram.exe as an artifact.
 #
@@ -33,6 +33,9 @@ on:
           - Release
           - Debug
         default: Release
+
+permissions:
+  contents: write
 
 concurrency:
   group: liquid-glass-windows-${{ github.ref }}
@@ -351,12 +354,35 @@ jobs:
         run: |
           set OUT=%TBUILD%\%REPO_NAME%\out\%CONFIGURATION%
           mkdir artifact
-          move %OUT%\Telegram.exe artifact/
+          move %OUT%\Telegram.exe artifact\aglergram.exe
 
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         with:
-          name: LiquidGlass-Telegram-win64-${{ env.CONFIGURATION }}
+          name: aglergram-win64-${{ env.CONFIGURATION }}
           path: artifact\
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish the release.
+        # One release per patch notes version, the app updates itself from it.
+        if: env.CONFIGURATION == 'Release' && github.ref == 'refs/heads/liquid-glass'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $patches = Get-Content "$env:TBUILD\$env:REPO_NAME\Telegram\Resources\liquid\patches.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+          $latest = $patches.patches[-1]
+          $tag = "aglergram-v$($latest.version)"
+          $notes = "## $($latest.title)`n`n"
+          foreach ($item in $latest.items) {
+            $notes += "$($item.icon) **$($item.title)** — $($item.text)`n`n"
+          }
+          $notes | Out-File -FilePath notes.md -Encoding utf8
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag exists, updating the file."
+            gh release upload $tag artifact\aglergram.exe --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $tag artifact\aglergram.exe --repo $env:GITHUB_REPOSITORY --title "aglergram $($latest.version) — $($latest.title)" --notes-file notes.md --latest
+          }

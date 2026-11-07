@@ -2548,6 +2548,8 @@ PRIVATE
     window/window_history_hider.h
     window/window_liquid_features.cpp
     window/window_liquid_features.h
+    window/window_liquid_updates.cpp
+    window/window_liquid_updates.h
     window/window_liquid_intro.cpp
     window/window_liquid_intro.h
     window/window_lock_widgets.cpp

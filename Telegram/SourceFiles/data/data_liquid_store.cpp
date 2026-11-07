@@ -25,6 +25,8 @@ struct State {
 	std::vector<Template> templates;
 	Sunset sunset;
 	QString translateTo = u"en"_q;
+	QString lastSeenVersion;
+	QString liveWallpaper;
 	rpl::event_stream<> notesChanged;
 };
 
@@ -72,6 +74,8 @@ void Save() {
 			{ u"longitude"_q, state.sunset.longitude },
 		} },
 		{ u"translateTo"_q, state.translateTo },
+		{ u"lastSeenVersion"_q, state.lastSeenVersion },
+		{ u"liveWallpaper"_q, state.liveWallpaper },
 	};
 	auto file = QFile(state.folder + u"liquid_store.json"_q);
 	if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -127,6 +131,8 @@ void Load(const QString &folder) {
 	state.sunset.latitude = sunset.value(u"latitude"_q).toDouble(47.22);
 	state.sunset.longitude = sunset.value(u"longitude"_q).toDouble(39.72);
 	state.translateTo = object.value(u"translateTo"_q).toString(u"en"_q);
+	state.lastSeenVersion = object.value(u"lastSeenVersion"_q).toString();
+	state.liveWallpaper = object.value(u"liveWallpaper"_q).toString();
 }
 
 QString Folder() {
@@ -216,6 +222,24 @@ QString TranslateTo() {
 
 void SetTranslateTo(const QString &code) {
 	Current().translateTo = code;
+	Save();
+}
+
+QString LastSeenVersion() {
+	return Current().lastSeenVersion;
+}
+
+void SetLastSeenVersion(const QString &version) {
+	Current().lastSeenVersion = version;
+	Save();
+}
+
+QString LiveWallpaper() {
+	return Current().liveWallpaper;
+}
+
+void SetLiveWallpaper(const QString &path) {
+	Current().liveWallpaper = path;
 	Save();
 }
 

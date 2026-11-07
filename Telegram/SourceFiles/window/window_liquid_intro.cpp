@@ -424,7 +424,7 @@ void Intro::paintWelcome(QPainter &p, crl::time now) {
 		p.drawText(
 			QRect(0, titleTop + 54, width(), 26),
 			Qt::AlignHCenter | Qt::AlignVCenter,
-			u"Liquid Glass Telegram — выбери, с кого начнём"_q);
+			u"aglergram — выбери, с кого начнём"_q);
 		p.restore();
 	}
 }

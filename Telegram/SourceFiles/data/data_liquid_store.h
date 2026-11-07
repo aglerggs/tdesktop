@@ -63,6 +63,14 @@ void SetSunsetSettings(Sunset settings);
 [[nodiscard]] QString TranslateTo();
 void SetTranslateTo(const QString &code);
 
+// The last version whose patch notes were shown.
+[[nodiscard]] QString LastSeenVersion();
+void SetLastSeenVersion(const QString &version);
+
+// Live wallpaper: a video file path, a resource path or empty.
+[[nodiscard]] QString LiveWallpaper();
+void SetLiveWallpaper(const QString &path);
+
 // Text recognized on photos, per chat: message id -> text.
 [[nodiscard]] base::flat_map<MsgId, QString> RecognizedTexts(
 	not_null<Main::Session*> session,

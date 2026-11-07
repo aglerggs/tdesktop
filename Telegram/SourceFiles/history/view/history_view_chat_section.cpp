@@ -130,6 +130,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "mainwidget.h"
+#include "window/window_liquid_updates.h"
 #include "styles/style_info.h"
 #include "styles/style_window.h"
 #include "styles/style_boxes.h"
@@ -599,6 +600,17 @@ ChatWidget::ChatWidget(
 		onScroll();
 	}, lifetime());
 	setupLiquidGlass();
+	Window::Liquid::LiveWallpaperFrames(
+	) | rpl::on_next([=] {
+		update();
+		if (_glassTop) {
+			_topBar->update();
+			_topControls->updateGlass();
+		}
+		if (_glassBottom) {
+			_composeControls->updateGlass();
+		}
+	}, lifetime());
 	setupSendingLanding();
 	if (session().supportMode() && mode() == Mode::History && !_topic) {
 		_supportAutocomplete = std::make_unique<Support::Autocomplete>(
