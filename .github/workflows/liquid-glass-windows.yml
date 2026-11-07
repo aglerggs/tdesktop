@@ -246,8 +246,12 @@ jobs:
               cmd /c "rmdir /s /q `"$d`"" 2>$null
             }
           }
-          docker system prune -a -f 2>$null | Out-Null
+          if (Get-Command docker -ErrorAction SilentlyContinue) {
+            docker system prune -a -f 2>$null | Out-Null
+          }
           Get-PSDrive C | Format-Table Used,Free
+          # Cleaning up is best effort, never fail the build because of it.
+          exit 0
 
       - name: Libraries.
         id: libraries
