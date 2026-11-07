@@ -6011,19 +6011,32 @@ AboutView *ListWidget::aboutView() const {
 
 int ListWidget::countBottomPadding() const {
 	const auto about = aboutView();
-	return (about && about->view() && !about->aboveHistory())
+	return _glassBottom + ((about && about->view() && !about->aboveHistory())
 		? std::max(st::historyPaddingBottom, about->height)
-		: st::historyPaddingBottom;
+		: st::historyPaddingBottom);
+}
+
+void ListWidget::setGlassInsets(int top, int bottom) {
+	if (_glassTop == top && _glassBottom == bottom) {
+		return;
+	}
+	_glassTop = top;
+	_glassBottom = bottom;
+	if (width() > 0) {
+		resizeToWidth(width(), _minHeight);
+	}
 }
 
 int ListWidget::countItemsTop() const {
 	const auto full = _itemsHeight
 		+ collapseGapsTotal()
 		+ countBottomPadding();
-	const auto result = (_minHeight > full) ? (_minHeight - full) : 0;
+	const auto result = std::max(
+		(_minHeight > full) ? (_minHeight - full) : 0,
+		_glassTop);
 	const auto about = aboutView();
 	return (about && about->view() && about->aboveHistory())
-		? std::max(result, about->height)
+		? std::max(result, about->height + _glassTop)
 		: result;
 }
 

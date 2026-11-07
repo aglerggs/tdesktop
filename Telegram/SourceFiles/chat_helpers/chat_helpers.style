@@ -1920,6 +1920,13 @@ historyGlassRecordBar: RecordBar(defaultRecordBar) {
 	radius: 23px;
 }
 
+historyGlassComposeControls: ComposeControls(defaultComposeControls) {
+	bg: transparent;
+	field: historyGlassComposeField;
+	emoji: historyGlassAttachEmoji;
+	record: historyGlassRecordBar;
+}
+
 // Liquid glass pinned message: a floating capsule.
 historyPinnedGlassMargins: margins(10px, 4px, 10px, 2px);
 historyPinnedGlassRadius: 16px;

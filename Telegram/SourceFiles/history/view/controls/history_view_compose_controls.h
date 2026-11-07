@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/compose_controls_common.h"
 #include "history/view/controls/history_view_bot_menu_button.h"
 #include "ui/round_rect.h"
+#include "ui/effects/liquid_glass.h"
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/widgets/fields/input_field.h"
@@ -189,6 +190,10 @@ public:
 
 	void move(int x, int y);
 	void resizeToWidth(int width);
+	// Liquid glass: paint the area as a glass capsule over the backdrop.
+	void setGlassBackdrop(Ui::LiquidGlass::BackdropProvider provider);
+	void updateGlass();
+	void raiseWrap();
 	void setAutocompleteBoundingRect(QRect rect);
 	[[nodiscard]] rpl::producer<int> height() const;
 	[[nodiscard]] int heightCurrent() const;
@@ -559,6 +564,8 @@ private:
 	rpl::event_stream<FullReplyTo> _jumpToItemRequests;
 
 	std::optional<Ui::RoundRect> _backgroundRect;
+	std::unique_ptr<Ui::LiquidGlass::Surface> _glass;
+	Ui::LiquidGlass::BackdropProvider _glassBackdrop;
 
 	const std::shared_ptr<Ui::SendButton> _send;
 	rpl::event_stream<bool> _sendLockBadge;

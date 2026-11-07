@@ -129,6 +129,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
+#include "mainwidget.h"
 #include "styles/style_info.h"
 #include "styles/style_window.h"
 #include "styles/style_boxes.h"
@@ -379,6 +380,9 @@ ChatWidget::ChatWidget(
 , _composeControls(std::make_unique<ComposeControls>(
 	this,
 	ComposeControlsDescriptor{
+		.stOverride = (Ui::LiquidGlass::Enabled()
+			? &st::historyGlassComposeControls
+			: nullptr),
 		.show = controller->uiShow(),
 		.unavailableEmojiPasted = [=](not_null<DocumentData*> emoji) {
 			listShowPremiumToast(emoji);
@@ -594,6 +598,7 @@ ChatWidget::ChatWidget(
 	) | rpl::on_next([=] {
 		onScroll();
 	}, lifetime());
+	setupLiquidGlass();
 	setupSendingLanding();
 	if (session().supportMode() && mode() == Mode::History && !_topic) {
 		_supportAutocomplete = std::make_unique<Support::Autocomplete>(
@@ -1130,6 +1135,10 @@ void ChatWidget::orderWidgets() {
 		_kbScroll->raise();
 	}
 	_bottom->raise();
+	if (_glassEnabled) {
+		// The list goes under the capsule now.
+		_composeControls->raiseWrap();
+	}
 	_composeControls->raisePanels();
 	if (_membersDropdown) {
 		_membersDropdown->raise();
@@ -4484,9 +4493,79 @@ void ChatWidget::resizeEvent(QResizeEvent *e) {
 	if (!width() || !height()) {
 		return;
 	}
-	_composeControls->resizeToWidth(width());
+	_composeWidth = composeWidth();
+	_composeControls->resizeToWidth(_composeWidth);
 	recountChatWidth();
 	updateControlsGeometry();
+}
+
+void ChatWidget::setupLiquidGlass() {
+	if (!Ui::LiquidGlass::Enabled()) {
+		return;
+	}
+	_glassEnabled = true;
+	_topBar->setGlassBackdrop([=](QRect rect) {
+		const auto shift = _topBar->pos();
+		auto result = grabGlassBackdrop(rect.translated(shift));
+		result.rect.translate(-shift);
+		return result;
+	});
+	_composeControls->setGlassBackdrop([=](QRect rect) {
+		return grabGlassBackdrop(rect);
+	});
+	_scroll->scrolls(
+	) | rpl::on_next([=] {
+		if (_glassTop) {
+			_topBar->update();
+		}
+		if (_glassBottom) {
+			_composeControls->updateGlass();
+		}
+	}, lifetime());
+}
+
+int ChatWidget::composeWidth() const {
+	return _glassBottom
+		? std::max(width() - 2 * st::historyGlassComposeSide, 1)
+		: width();
+}
+
+Ui::LiquidGlass::Backdrop ChatWidget::grabGlassBackdrop(QRect rect) {
+	rect = rect.intersected(this->rect());
+	if (rect.isEmpty()) {
+		return {};
+	}
+	// Device pixel ratio 1 is enough, the backdrop is blurred anyway.
+	auto result = Ui::LiquidGlass::Backdrop{
+		.image = QImage(rect.size(), QImage::Format_ARGB32_Premultiplied),
+		.rect = rect,
+	};
+	result.image.fill(st::windowBg->c);
+	{
+		auto p = QPainter(&result.image);
+		const auto fromy = controller()->content()->backgroundFromY();
+		p.translate(-rect.x(), fromy - rect.y());
+		Window::SectionWidget::PaintBackground(
+			p,
+			_theme.get(),
+			QSize(width(), controller()->content()->height()),
+			rect.translated(0, -fromy),
+			controller()->isGifPausedAtLeastFor(
+				Window::GifPauseReason::Any));
+	}
+	if (_inner && !_scroll->isHidden()) {
+		const auto origin = _inner->mapTo(this, QPoint());
+		const auto source = rect.translated(-origin).intersected(
+			_inner->rect());
+		if (!source.isEmpty()) {
+			_inner->render(
+				&result.image,
+				source.topLeft() + origin - rect.topLeft(),
+				QRegion(source),
+				QWidget::DrawChildren);
+		}
+	}
+	return result;
 }
 
 void ChatWidget::recountChatWidth() {
@@ -4507,7 +4586,19 @@ void ChatWidget::updateControlsGeometry() {
 		? base::make_optional(takeTopDelta() + _scrollTopDelta)
 		: 0;
 	_topBar->resizeToWidth(contentWidth);
-	_topBarShadow->resize(contentWidth, st::lineWidth);
+	// Liquid glass: the list scrolls under the top bar and the compose
+	// capsule, forum tabs and bot keyboards keep the classic layout.
+	_glassTop = _glassEnabled && !_subsectionTabs;
+	_glassBottom = _glassTop
+		&& !isChoosingTheme()
+		&& !_suggestOptions
+		&& !(_kbScroll && _kbShown)
+		&& (_bottom->contentHeight() <= 0);
+	if (const auto w = composeWidth(); w != _composeWidth) {
+		_composeWidth = w;
+		_composeControls->resizeToWidth(w);
+	}
+	_topBarShadow->resize(_glassTop ? 0 : contentWidth, st::lineWidth);
 	const auto tabsLeftSkip = _subsectionTabs
 		? _subsectionTabs->leftSkip()
 		: 0;
@@ -4564,13 +4655,22 @@ void ChatWidget::updateControlsGeometry() {
 			bottom -= _composeControls->heightCurrent();
 		}
 	}
+	if (_glassBottom) {
+		bottom -= st::historyGlassComposeBottom;
+	}
 	const auto composeTop = bottom;
 	if (_suggestOptions) {
 		bottom -= st::historyReplyHeight;
 	}
 	bottom -= tabsBottomSkip;
 
-	const auto scrollHeight = bottom - top;
+	const auto scrollTop = _glassTop ? 0 : top;
+	const auto scrollBottom = _glassBottom ? height() : bottom;
+	_inner->setGlassInsets(
+		_glassTop ? top : 0,
+		_glassBottom ? (height() - composeTop) : 0);
+	_cornerButtons.setBottomSkip(_glassBottom ? (height() - composeTop) : 0);
+	const auto scrollHeight = scrollBottom - scrollTop;
 	const auto scrollSize = QSize(innerWidth, scrollHeight);
 	if (_scroll->size() != scrollSize) {
 		_skipScrollEvent = true;
@@ -4578,7 +4678,7 @@ void ChatWidget::updateControlsGeometry() {
 		_inner->resizeToWidth(scrollSize.width(), _scroll->height());
 		_skipScrollEvent = false;
 	}
-	_scroll->move(tabsLeftSkip, top);
+	_scroll->move(tabsLeftSkip, scrollTop);
 	if (!_scroll->isHidden()) {
 		if (wasAtBottom) {
 			_scroll->scrollToY(_scroll->scrollTopMax());
@@ -4595,7 +4695,9 @@ void ChatWidget::updateControlsGeometry() {
 		}
 		updateInnerVisibleArea();
 	}
-	_composeControls->move(0, composeTop);
+	_composeControls->move(
+		_glassBottom ? st::historyGlassComposeSide : 0,
+		composeTop);
 	_composeControls->setAutocompleteBoundingRect(_scroll->geometry());
 	if (_supportAutocomplete) {
 		_supportAutocomplete->setBoundings(_scroll->geometry());
@@ -4639,7 +4741,7 @@ void ChatWidget::paintEvent(QPaintEvent *e) {
 		return;
 	}
 
-	const auto aboveHeight = _topBar->height();
+	const auto aboveHeight = _glassTop ? 0 : _topBar->height();
 	const auto bg = e->rect().intersected(
 		QRect(0, aboveHeight, width(), height() - aboveHeight));
 	SectionWidget::PaintBackground(controller(), _theme.get(), this, bg);

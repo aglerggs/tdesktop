@@ -359,6 +359,9 @@ public:
 	void restoreScrollPosition();
 
 	void resizeToWidth(int newWidth, int minHeight);
+	// Liquid glass: the list scrolls under the top bar and the compose
+	// capsule, keep the first and the last messages out from under them.
+	void setGlassInsets(int top, int bottom);
 	void shiftScrollBaseline(int delta);
 	void liftItemReveal(not_null<HistoryItem*> item, int lift);
 
@@ -791,6 +794,8 @@ private:
 	[[nodiscard]] int collapseGapsTotal() const;
 	[[nodiscard]] AboutView *aboutView() const;
 	[[nodiscard]] int countBottomPadding() const;
+	int _glassTop = 0;
+	int _glassBottom = 0;
 	[[nodiscard]] int countItemsTop() const;
 	void setItemsTop(int top);
 	void refreshAttachmentsFromTill(int from, int till);

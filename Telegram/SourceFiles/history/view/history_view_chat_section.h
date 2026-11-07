@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_report.h"
 #include "ui/controls/swipe_handler_data.h"
 #include "base/timer.h"
+#include "ui/effects/liquid_glass.h"
 
 class History;
 class BotKeyboard;
@@ -332,6 +333,9 @@ private:
 	void unreadCountUpdated();
 	void updateInnerVisibleArea();
 	void updateControlsGeometry();
+	void setupLiquidGlass();
+	[[nodiscard]] Ui::LiquidGlass::Backdrop grabGlassBackdrop(QRect rect);
+	[[nodiscard]] int composeWidth() const;
 	void updateAdaptiveLayout();
 	void saveHistoryScrollState(const ListMemento &state);
 	void saveState(not_null<ChatMemento*> memento);
@@ -625,6 +629,10 @@ private:
 	int _lastScrollTop = 0;
 	int _scrollTopDelta = 0;
 	int _composeControlsTop = 0;
+	bool _glassEnabled = false;
+	bool _glassTop = false;
+	bool _glassBottom = false;
+	int _composeWidth = 0;
 	crl::time _lastUserScrolled = 0;
 
 	bool _choosingAttach = false;

@@ -205,6 +205,10 @@ public:
 	void setHistory(const SetHistoryArgs &args);
 	void updateTopicRootId(MsgId topicRootId);
 	void init();
+	void setTransparent(bool transparent) {
+		_transparent = transparent;
+		update();
+	}
 
 	void editMessage(
 		FullMsgId id,
@@ -268,6 +272,7 @@ public:
 	[[nodiscard]] rpl::producer<bool> visibleChanged();
 
 private:
+	bool _transparent = false;
 	void updateControlsGeometry(QSize size);
 	void updateVisible();
 	void setShownMessage(HistoryItem *message);
@@ -395,7 +400,9 @@ void FieldHeader::init() {
 	) | rpl::on_next([=] {
 		Painter p(this);
 		p.setInactive(_show->paused(Window::GifPauseReason::Any));
-		p.fillRect(rect(), st::historyComposeAreaBg);
+		if (!_transparent) {
+			p.fillRect(rect(), st::historyComposeAreaBg);
+		}
 
 		const auto position = st::historyReplyIconPosition;
 		if (_suggestOptions) {
@@ -5745,8 +5752,53 @@ void ComposeControls::updateAttachBotsMenu() {
 	}, _attachBotsMenu->lifetime());
 }
 
+void ComposeControls::setGlassBackdrop(
+		Ui::LiquidGlass::BackdropProvider provider) {
+	_glassBackdrop = std::move(provider);
+	if (!_glassBackdrop || !Ui::LiquidGlass::Enabled()) {
+		_glassBackdrop = nullptr;
+		_glass = nullptr;
+		_header->setTransparent(false);
+		_wrap->update();
+		return;
+	} else if (!_glass) {
+		_glass = std::make_unique<Ui::LiquidGlass::Surface>();
+		const auto refresh = [=] {
+			if (_glass) {
+				_glass->setStyle(Ui::LiquidGlass::MakeStyle(
+					st::historyComposeAreaBg->c,
+					st::historyGlassComposeRadius));
+				_wrap->update();
+			}
+		};
+		refresh();
+		style::PaletteChanged(
+		) | rpl::on_next(refresh, _wrap->lifetime());
+	}
+	_header->setTransparent(true);
+	_wrap->update();
+}
+
+void ComposeControls::raiseWrap() {
+	_wrap->raise();
+}
+
+void ComposeControls::updateGlass() {
+	if (_glass) {
+		_wrap->update();
+	}
+}
+
 void ComposeControls::paintBackground(QPainter &p, QRect full, QRect clip) {
-	if (_backgroundRect) {
+	if (_glass && _glassBackdrop) {
+		const auto margin = _glass->backdropMargin();
+		const auto global = full.translated(_wrap->pos());
+		auto backdrop = _glassBackdrop(
+			global.marginsAdded({ margin, margin, margin, margin }));
+		backdrop.rect.translate(-_wrap->pos());
+		_glass->paint(p, full, backdrop);
+		return;
+	} else if (_backgroundRect) {
 		auto hq = PainterHighQualityEnabler(p);
 		p.setBrush(_st.bg);
 		p.setPen(Qt::NoPen);
