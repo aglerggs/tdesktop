@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "data/data_media_types.h"
 #include "data/data_peer.h"
+#include "data/data_session.h"
+#include "history/history_item_helpers.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "lang/lang_keys.h"
@@ -82,6 +84,12 @@ void WriteJson(const QString &path, const QJsonObject &object) {
 	result.insert(u"changed"_q, double(entry.changed));
 	result.insert(u"author"_q, entry.author);
 	result.insert(u"text"_q, entry.text);
+	if (entry.fromId) {
+		result.insert(u"from"_q, QString::number(entry.fromId));
+	}
+	if (entry.out) {
+		result.insert(u"out"_q, true);
+	}
 	return result;
 }
 
@@ -92,7 +100,17 @@ void WriteJson(const QString &path, const QJsonObject &object) {
 		.changed = TimeId(object.value(u"changed"_q).toDouble()),
 		.author = object.value(u"author"_q).toString(),
 		.text = object.value(u"text"_q).toString(),
+		.fromId = object.value(u"from"_q).toString().toULongLong(),
+		.out = object.value(u"out"_q).toBool(),
 	};
+}
+
+base::flat_map<QString, std::vector<Entry>> DeletedCache;
+
+[[nodiscard]] QString CacheKey(not_null<Main::Session*> session, PeerId peer) {
+	return QString::number(session->userId().bare)
+		+ ':'
+		+ QString::number(peer.value);
 }
 
 void Append(
@@ -109,6 +127,7 @@ void Append(
 	}
 	object.insert(key, list);
 	WriteJson(path, object);
+	DeletedCache.remove(CacheKey(session, peer));
 }
 
 [[nodiscard]] std::vector<Entry> Load(
@@ -218,6 +237,8 @@ void Keep(not_null<HistoryItem*> item) {
 		.changed = now,
 		.author = item->from()->name(),
 		.text = ItemText(item),
+		.fromId = item->from()->id.value,
+		.out = item->out(),
 	});
 	Marked.emplace(item->fullId());
 }
@@ -244,6 +265,108 @@ void RememberEdit(
 
 std::vector<Entry> Deleted(not_null<PeerData*> peer) {
 	return Load(&peer->session(), peer->id, u"deleted"_q);
+}
+
+QVector<MTPMessage> WithDeleted(
+		not_null<History*> history,
+		const QVector<MTPMessage> &slice) {
+	if (!Enabled() || slice.isEmpty()) {
+		return slice;
+	}
+	const auto peer = history->peer;
+	const auto session = &history->session();
+	const auto key = CacheKey(session, peer->id);
+	auto i = DeletedCache.find(key);
+	if (i == end(DeletedCache)) {
+		i = DeletedCache.emplace(key, Deleted(peer)).first;
+	}
+	const auto &entries = i->second;
+	if (entries.empty()) {
+		return slice;
+	}
+	auto minId = std::numeric_limits<int64>::max();
+	auto maxId = int64(0);
+	auto present = base::flat_set<int64>();
+	for (const auto &message : slice) {
+		const auto id = IdFromMessage(message).bare;
+		minId = std::min(minId, id);
+		maxId = std::max(maxId, id);
+		present.emplace(id);
+	}
+	auto added = std::vector<MTPMessage>();
+	for (const auto &entry : entries) {
+		const auto id = entry.id.bare;
+		if (id < minId
+			|| id > maxId
+			|| present.contains(id)
+			|| history->owner().message(peer->id, entry.id)) {
+			continue;
+		}
+		present.emplace(id);
+		using Flag = MTPDmessage::Flag;
+		const auto fromId = entry.fromId
+			? PeerId(entry.fromId)
+			: entry.out
+			? session->userPeerId()
+			: peer->id;
+		const auto flags = Flag::f_from_id
+			| (entry.out ? Flag::f_out : Flag());
+		added.push_back(MTP_message(
+			MTP_flags(flags),
+			MTP_int(entry.id.bare),
+			peerToMTP(fromId),
+			MTPint(), // from_boosts_applied
+			MTPstring(), // from_rank
+			peerToMTP(peer->id),
+			MTPPeer(), // saved_peer_id
+			MTPMessageFwdHeader(),
+			MTPlong(), // via_bot_id
+			MTPlong(), // via_business_bot_id
+			MTPPeer(), // guestchat_via_from
+			MTPMessageReplyHeader(),
+			MTP_int(entry.date),
+			MTP_string(entry.text),
+			MTPMessageMedia(),
+			MTPReplyMarkup(),
+			MTPVector<MTPMessageEntity>(),
+			MTPint(), // views
+			MTPint(), // forwards
+			MTPMessageReplies(),
+			MTPint(), // edit_date
+			MTPstring(), // post_author
+			MTPlong(), // grouped_id
+			MTPMessageReactions(),
+			MTPVector<MTPRestrictionReason>(),
+			MTPint(), // ttl_period
+			MTPint(), // quick_reply_shortcut_id
+			MTPlong(), // effect
+			MTPFactCheck(),
+			MTPint(), // report_delivery_until_date
+			MTPlong(), // paid_message_stars
+			MTPSuggestedPost(),
+			MTPint(), // schedule_repeat_period
+			MTPstring(), // summary_from_language
+			MTPRichMessage()));
+		Marked.emplace(FullMsgId(peer->id, entry.id));
+	}
+	if (added.empty()) {
+		return slice;
+	}
+	// Keep the order the server used: newest first or oldest first.
+	const auto descending = (slice.size() < 2)
+		|| (IdFromMessage(slice.front()) >= IdFromMessage(slice.back()));
+	auto result = slice;
+	for (const auto &message : added) {
+		result.push_back(message);
+	}
+	std::stable_sort(result.begin(), result.end(), [&](
+			const MTPMessage &a,
+			const MTPMessage &b) {
+		return descending
+			? (IdFromMessage(a) > IdFromMessage(b))
+			: (IdFromMessage(a) < IdFromMessage(b));
+	});
+	return result;
 }
 
 bool HasDeleted(not_null<PeerData*> peer) {

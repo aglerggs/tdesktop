@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+class History;
 class HistoryItem;
 class PeerData;
 
@@ -42,7 +43,15 @@ struct Entry {
 	TimeId changed = 0;
 	QString author;
 	QString text;
+	uint64 fromId = 0;
+	bool out = false;
 };
+
+// Puts the kept deleted messages back into a slice loaded from the server,
+// so they stay in the chat after a restart, at their place, with a mark.
+[[nodiscard]] QVector<MTPMessage> WithDeleted(
+	not_null<History*> history,
+	const QVector<MTPMessage> &slice);
 
 [[nodiscard]] std::vector<Entry> Deleted(not_null<PeerData*> peer);
 [[nodiscard]] bool HasDeleted(not_null<PeerData*> peer);

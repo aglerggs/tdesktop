@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history.h"
 
+#include "data/data_saved_deleted.h"
+
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_item_preview.h"
 #include "history/view/history_view_translate_tracker.h"
@@ -1900,7 +1902,10 @@ void History::addEdgesToSharedMedia() {
 	}
 }
 
-void History::addOlderSlice(const QVector<MTPMessage> &slice) {
+void History::addOlderSlice(const QVector<MTPMessage> &original) {
+	// Liquid glass fork: kept deleted messages come back at their place.
+	const auto merged = Data::SavedDeleted::WithDeleted(this, original);
+	const auto &slice = merged;
 	if (slice.isEmpty()) {
 		_loadedAtTop = true;
 		checkLocalMessages();
@@ -1949,7 +1954,9 @@ void History::addCreatedOlderSlice(
 	addToSharedMedia(items);
 }
 
-void History::addNewerSlice(const QVector<MTPMessage> &slice) {
+void History::addNewerSlice(const QVector<MTPMessage> &original) {
+	const auto merged = Data::SavedDeleted::WithDeleted(this, original);
+	const auto &slice = merged;
 	bool wasLoadedAtBottom = loadedAtBottom();
 
 	if (slice.isEmpty()) {
