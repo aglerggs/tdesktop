@@ -298,6 +298,11 @@ void Intro::tick() {
 	if (_hideStarted && crl::now() - _hideStarted >= kHideDuration) {
 		_ticker.stop();
 		const auto done = base::take(_hideDone);
+		// Don't let the focus jump to the next widget: that would be
+		// the chats search field, which opens the search suggestions.
+		if (const auto parent = parentWidget()) {
+			parent->setFocus(Qt::OtherFocusReason);
+		}
 		hide();
 		deleteLater();
 		if (done) {
