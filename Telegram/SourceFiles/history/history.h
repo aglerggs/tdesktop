@@ -407,6 +407,19 @@ public:
 	[[nodiscard]] std::unique_ptr<Data::ComposeStash> takeComposeStash(
 		Data::DraftKey key);
 
+	// aglergram: several stashed messages per draft key. The newest one
+	// is composeStash(key), the older ones wait behind it.
+	void pushComposeStash(
+		Data::DraftKey key,
+		std::unique_ptr<Data::ComposeStash> stash);
+	[[nodiscard]] int composeStashCount(Data::DraftKey key) const;
+	[[nodiscard]] Data::ComposeStash *composeStashAt(
+		Data::DraftKey key,
+		int index) const;
+	[[nodiscard]] std::unique_ptr<Data::ComposeStash> takeComposeStashAt(
+		Data::DraftKey key,
+		int index);
+
 	History *migrateSibling() const;
 	[[nodiscard]] bool useTopPromotion() const;
 	int fixedOnTopIndex() const override;
@@ -720,6 +733,9 @@ private:
 	base::flat_map<
 		Data::DraftKey,
 		std::unique_ptr<Data::ComposeStash>> _composeStashes;
+	base::flat_map<
+		Data::DraftKey,
+		std::vector<std::unique_ptr<Data::ComposeStash>>> _olderComposeStashes;
 
 	base::flat_map<MsgId, TimeId> _unknownDeletedMessages;
 

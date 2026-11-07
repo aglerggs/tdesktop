@@ -2143,8 +2143,8 @@ void Application::RegisterUrlScheme() {
 		.protocolName = u"Telegram Link"_q,
 		.shortAppName = u"tdesktop"_q,
 		.longAppName = QCoreApplication::applicationName(),
-		.displayAppName = AppName.utf16(),
-		.displayAppDescription = AppName.utf16(),
+		.displayAppName = AppDisplayName.utf16(),
+		.displayAppDescription = AppDisplayName.utf16(),
 	});
 
 	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{

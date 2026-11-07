@@ -64,6 +64,35 @@ void FillStashMenu(
 		&st::menuIconSend);
 }
 
+[[nodiscard]] QString StashPreview(const Data::ComposeStash &stash) {
+	auto text = stash.draft.textWithTags.text.simplified();
+	if (text.isEmpty() && stash.draft.hasRichMessage()) {
+		text = u"Форматированное сообщение"_q;
+	}
+	const auto files = int(stash.files.files.size()
+		+ stash.files.filesToProcess.size());
+	const auto forwards = int(stash.forward.ids.size());
+	auto prefix = QString();
+	if (files > 0) {
+		prefix += u"📎%1 "_q.arg(files);
+	}
+	if (forwards > 0) {
+		prefix += u"↪%1 "_q.arg(forwards);
+	}
+	if (text.isEmpty()) {
+		text = (files > 0)
+			? u"Файлы"_q
+			: (forwards > 0)
+			? u"Пересылка"_q
+			: u"Пусто"_q;
+	}
+	constexpr auto kMaxPreview = 40;
+	if (text.size() > kMaxPreview) {
+		text = text.left(kMaxPreview - 1) + QChar(0x2026);
+	}
+	return prefix + text;
+}
+
 } // namespace
 
 StashManager::StashManager(StashManagerDescriptor &&descriptor)
@@ -78,6 +107,7 @@ StashManager::StashManager(StashManagerDescriptor &&descriptor)
 			if (!current()) {
 				return;
 			}
+			fillListMenu(menu);
 			FillStashMenu(
 				menu,
 				_data.show,
@@ -134,22 +164,75 @@ bool StashManager::exchange() {
 	const auto key = history ? _data.key() : Data::DraftKey::None();
 	if (!key || !_data.allowed()) {
 		return false;
+	}
+	// aglergram: Ctrl+S with text puts it on top of the stashed ones,
+	// with an empty field it brings the newest one back.
+	if (_data.hasContent()) {
+		if (auto now = _data.take()) {
+			history->pushComposeStash(key, std::move(now));
+		}
+		updateButton();
+		return true;
 	} else if (const auto stashed = history->composeStash(key)) {
 		if (!checkApplicable(*stashed)) {
 			return false;
 		}
-	} else if (!_data.hasContent()) {
+	} else {
 		return false;
 	}
-	auto taken = history->takeComposeStash(key);
-	if (auto now = _data.take()) {
-		history->setComposeStash(key, std::move(now));
+	if (auto taken = history->takeComposeStash(key)) {
+		applyStash(std::move(*taken));
+	}
+	updateButton();
+	return true;
+}
+
+void StashManager::fillListMenu(not_null<Ui::PopupMenu*> menu) {
+	const auto history = _data.history();
+	const auto key = history ? _data.key() : Data::DraftKey::None();
+	const auto count = key ? history->composeStashCount(key) : 0;
+	if (count < 2) {
+		return;
+	}
+	for (auto i = 0; i != count; ++i) {
+		const auto stash = history->composeStashAt(key, i);
+		if (!stash) {
+			continue;
+		}
+		menu->addAction(
+			u"%1. "_q.arg(i + 1) + StashPreview(*stash),
+			crl::guard(this, [=] { restoreAt(i); }),
+			&st::menuIconEdit);
+	}
+	menu->addAction(
+		u"Удалить все отложенные (%1)"_q.arg(count),
+		crl::guard(this, [=] {
+			if (const auto history = _data.history()) {
+				history->setComposeStash(_data.key(), nullptr);
+			}
+			updateButton();
+		}),
+		&st::menuIconDelete);
+	menu->addSeparator();
+}
+
+void StashManager::restoreAt(int index) {
+	const auto history = _data.history();
+	const auto key = history ? _data.key() : Data::DraftKey::None();
+	const auto stash = key ? history->composeStashAt(key, index) : nullptr;
+	if (!stash || !_data.allowed() || !checkApplicable(*stash)) {
+		return;
+	}
+	auto taken = history->takeComposeStashAt(key, index);
+	if (_data.hasContent()) {
+		if (auto now = _data.take()) {
+			history->pushComposeStash(key, std::move(now));
+		}
 	}
 	if (taken) {
 		applyStash(std::move(*taken));
 	}
 	updateButton();
-	return true;
 }
 
 void StashManager::applyStash(Data::ComposeStash &&stash) {
@@ -168,18 +251,15 @@ void StashManager::keepFiles(Ui::PreparedList &&files) {
 	const auto key = history ? _data.key() : Data::DraftKey::None();
 	if (!key) {
 		return;
-	} else if (const auto stash = history->composeStash(key)) {
-		stash->files = std::move(files);
-	} else {
-		auto created = std::make_unique<Data::ComposeStash>();
-		created->files = std::move(files);
-		history->setComposeStash(key, std::move(created));
 	}
+	auto created = std::make_unique<Data::ComposeStash>();
+	created->files = std::move(files);
+	history->pushComposeStash(key, std::move(created));
 }
 
 void StashManager::remove() {
 	if (const auto history = _data.history()) {
-		history->setComposeStash(_data.key(), nullptr);
+		history->takeComposeStash(_data.key());
 	}
 	updateButton();
 }
@@ -202,10 +282,7 @@ void StashManager::sendStashed(Api::SendOptions options) {
 	}
 	if (kept) {
 		if (auto unsent = _data.take()) {
-			if (const auto files = history->composeStash(key)) {
-				unsent->files = std::move(files->files);
-			}
-			history->setComposeStash(key, std::move(unsent));
+			history->pushComposeStash(key, std::move(unsent));
 		}
 		_data.apply(std::move(*kept));
 	}
@@ -216,8 +293,7 @@ bool StashManager::canTakeFromBox() const {
 	if (!_data.allowed()) {
 		return false;
 	}
-	const auto previous = current();
-	return !previous || applicable(*previous);
+	return true;
 }
 
 void StashManager::takeFromBox(SendFilesStashed &&stashed) {
@@ -226,7 +302,6 @@ void StashManager::takeFromBox(SendFilesStashed &&stashed) {
 	if (!key) {
 		return;
 	}
-	auto previous = history->takeComposeStash(key);
 	auto result = std::make_unique<Data::ComposeStash>();
 	const auto length = int(stashed.caption.text.size());
 	result->draft = Data::Draft(
@@ -245,17 +320,7 @@ void StashManager::takeFromBox(SendFilesStashed &&stashed) {
 	}
 	_data.clearComposer();
 	_data.session->api().saveCurrentDraftToCloud();
-	history->setComposeStash(key, std::move(result));
-
-	if (previous) {
-		const auto shared = std::shared_ptr<Data::ComposeStash>(
-			std::move(previous));
-		crl::on_main(this, [=] {
-			if (_data.allowed()) {
-				applyStash(std::move(*shared));
-			}
-		});
-	}
+	history->pushComposeStash(key, std::move(result));
 	updateButton();
 }
 

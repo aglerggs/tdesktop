@@ -216,6 +216,20 @@ TextState BottomInfo::textState(
 	).contains(position);
 	if (inTime) {
 		result.cursor = CursorState::Date;
+		if (_data.editsCount > 0) {
+			// Liquid glass fork: "edited ×N" opens the edit history.
+			const auto id = item->fullId();
+			const auto session = &item->history()->session();
+			result.link = std::make_shared<LambdaClickHandler>([=](
+					ClickContext context) {
+				const auto my = context.other.value<ClickHandlerContext>();
+				const auto controller = my.sessionWindow.get();
+				const auto strong = session->data().message(id);
+				if (controller && strong) {
+					::Data::SavedDeleted::ShowEditsBox(controller, strong);
+				}
+			});
+		}
 	}
 	return result;
 }
@@ -538,7 +552,11 @@ void BottomInfo::layoutDateText() {
 		: updated
 		? (tr::lng_ephemeral_updated(tr::now) + ' ')
 		: (_data.flags & Data::Flag::Edited)
-		? (tr::lng_edited(tr::now) + ' ')
+		? (tr::lng_edited(tr::now)
+			+ (_data.editsCount > 0
+				? (u" ×"_q + QString::number(_data.editsCount + 1))
+				: QString())
+			+ ' ')
 		: (_data.flags & Data::Flag::EstimateDate)
 		? (tr::lng_approximate(tr::now) + ' ')
 		: _data.scheduleRepeatPeriod
@@ -750,6 +768,7 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 	if (IsAnchoredEphemeral(item)) {
 		result.flags |= Flag::Updated;
 	}
+	result.editsCount = ::Data::SavedDeleted::EditsCount(item);
 	if (::Data::SavedDeleted::IsMarked(item)) {
 		result.flags |= Flag::Deleted;
 	}

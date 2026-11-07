@@ -8,13 +8,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_liquid_features.h"
 
 #include "window/window_liquid_updates.h"
+#include "window/window_liquid_extras.h"
 
 #include "api/api_common.h"
 #include "apiwrap.h"
 #include "base/timer.h"
 #include "base/unixtime.h"
 #include "core/application.h"
+#include "data/data_chat_filters.h"
 #include "data/data_file_origin.h"
+#include "data/data_histories.h"
+#include "dialogs/dialogs_indexed_list.h"
+#include "dialogs/dialogs_main_list.h"
+#include "dialogs/dialogs_row.h"
 #include "data/data_liquid_store.h"
 #include "data/data_media_types.h"
 #include "data/data_peer.h"
@@ -873,6 +879,14 @@ void FillMessageMenu(
 	}
 	const auto session = &item->history()->session();
 	const auto itemId = item->fullId();
+	menu->addAction(
+		IsBookmarked(item) ? u"Убрать из закладок"_q : u"В закладки ⭐"_q,
+		[=] {
+			if (const auto strong = session->data().message(itemId)) {
+				ToggleBookmark(controller, strong);
+			}
+		},
+		&st::menuIconFave);
 	auto submenu = std::make_unique<Ui::PopupMenu>(
 		menu->parentWidget(),
 		menu->st());
@@ -1003,6 +1017,60 @@ void SetupFieldFeatures(
 				}
 			}));
 	});
+}
+
+void CreateUnreadFolder(not_null<SessionController*> controller) {
+	const auto session = &controller->session();
+	auto &filters = session->data().chatsFilters();
+	auto maxId = FilterId(1);
+	for (const auto &filter : filters.list()) {
+		if (filter.title().text.text == u"Непрочитанное"_q) {
+			controller->showToast(u"Папка «Непрочитанное» уже есть"_q);
+			return;
+		}
+		maxId = std::max(maxId, filter.id());
+	}
+	using Flag = Data::ChatFilter::Flag;
+	const auto filter = Data::ChatFilter(
+		maxId + 1,
+		Data::ChatFilterTitle{ .text = { u"Непрочитанное"_q } },
+		u"📬"_q,
+		std::nullopt,
+		(Flag::Contacts
+			| Flag::NonContacts
+			| Flag::Groups
+			| Flag::Channels
+			| Flag::Bots
+			| Flag::NoRead
+			| Flag::NoArchived),
+		{},
+		{},
+		{});
+	filters.set(filter);
+	session->api().request(MTPmessages_UpdateDialogFilter(
+		MTP_flags(MTPmessages_UpdateDialogFilter::Flag::f_filter),
+		MTP_int(filter.id()),
+		filter.tl()
+	)).send();
+	controller->showToast(
+		u"Готово: папка «Непрочитанное» сама собирает чаты с новыми сообщениями"_q);
+}
+
+void ReadAllChats(not_null<SessionController*> controller) {
+	const auto session = &controller->session();
+	auto count = 0;
+	const auto list = session->data().chatsList()->indexed();
+	for (const auto &row : *list) {
+		if (const auto history = row->history()) {
+			if (history->unreadCount() > 0 || history->unreadMark()) {
+				session->data().histories().readInbox(history);
+				++count;
+			}
+		}
+	}
+	controller->showToast(count
+		? (u"Прочитано чатов: "_q + QString::number(count))
+		: u"Непрочитанных чатов нет"_q);
 }
 
 void ShowTemplatesBox(not_null<SessionController*> controller) {

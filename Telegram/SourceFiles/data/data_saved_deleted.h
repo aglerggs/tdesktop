@@ -57,6 +57,10 @@ struct Entry {
 [[nodiscard]] bool HasDeleted(not_null<PeerData*> peer);
 [[nodiscard]] std::vector<Entry> Edits(not_null<HistoryItem*> item);
 [[nodiscard]] bool HasEdits(not_null<HistoryItem*> item);
+[[nodiscard]] int EditsCount(not_null<const HistoryItem*> item);
+void ShowAllEditsBox(
+	not_null<Window::SessionController*> controller,
+	not_null<PeerData*> peer);
 
 void ShowDeletedBox(
 	not_null<Window::SessionController*> controller,

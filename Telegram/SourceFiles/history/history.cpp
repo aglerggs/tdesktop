@@ -591,6 +591,8 @@ void History::setComposeStash(
 		_composeStashes[key] = std::move(stash);
 	} else if (!_composeStashes.remove(key)) {
 		return;
+	} else {
+		_olderComposeStashes.remove(key);
 	}
 	session().changes().historyUpdated(
 		this,
@@ -605,6 +607,88 @@ std::unique_ptr<Data::ComposeStash> History::takeComposeStash(
 	}
 	auto result = std::move(i->second);
 	_composeStashes.erase(i);
+	const auto j = _olderComposeStashes.find(key);
+	if (j != end(_olderComposeStashes)) {
+		if (!j->second.empty()) {
+			_composeStashes[key] = std::move(j->second.back());
+			j->second.pop_back();
+		}
+		if (j->second.empty()) {
+			_olderComposeStashes.erase(j);
+		}
+	}
+	session().changes().historyUpdated(
+		this,
+		Data::HistoryUpdate::Flag::ComposeStash);
+	return result;
+}
+
+void History::pushComposeStash(
+		Data::DraftKey key,
+		std::unique_ptr<Data::ComposeStash> stash) {
+	constexpr auto kMaxStashes = 30;
+	if (!key || !stash) {
+		return;
+	}
+	const auto i = _composeStashes.find(key);
+	if (i != end(_composeStashes) && i->second) {
+		auto &older = _olderComposeStashes[key];
+		older.push_back(std::move(i->second));
+		if (older.size() >= kMaxStashes) {
+			older.erase(begin(older));
+		}
+	}
+	_composeStashes[key] = std::move(stash);
+	session().changes().historyUpdated(
+		this,
+		Data::HistoryUpdate::Flag::ComposeStash);
+}
+
+int History::composeStashCount(Data::DraftKey key) const {
+	if (!composeStash(key)) {
+		return 0;
+	}
+	const auto j = _olderComposeStashes.find(key);
+	return 1 + ((j != end(_olderComposeStashes)) ? int(j->second.size()) : 0);
+}
+
+Data::ComposeStash *History::composeStashAt(
+		Data::DraftKey key,
+		int index) const {
+	if (index == 0) {
+		return composeStash(key);
+	}
+	const auto j = _olderComposeStashes.find(key);
+	if (index < 0 || j == end(_olderComposeStashes)) {
+		return nullptr;
+	}
+	const auto &older = j->second;
+	const auto position = int(older.size()) - index;
+	return (position >= 0 && position < int(older.size()))
+		? older[position].get()
+		: nullptr;
+}
+
+std::unique_ptr<Data::ComposeStash> History::takeComposeStashAt(
+		Data::DraftKey key,
+		int index) {
+	if (index == 0) {
+		return takeComposeStash(key);
+	}
+	const auto j = _olderComposeStashes.find(key);
+	if (index < 0 || j == end(_olderComposeStashes)) {
+		return nullptr;
+	}
+	auto &older = j->second;
+	const auto position = int(older.size()) - index;
+	if (position < 0 || position >= int(older.size())) {
+		return nullptr;
+	}
+	auto result = std::move(older[position]);
+	older.erase(begin(older) + position);
+	if (older.empty()) {
+		_olderComposeStashes.erase(j);
+	}
 	session().changes().historyUpdated(
 		this,
 		Data::HistoryUpdate::Flag::ComposeStash);

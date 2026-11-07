@@ -757,6 +757,41 @@ FillMenuResult FillSendMenu(
 				: tr::lng_schedule_message(tr::now)),
 			[=] { action({ .type = ActionType::Schedule }, details); },
 			&icons.menuSchedule);
+
+		// aglergram: quick schedule without the calendar.
+		auto quick = std::make_unique<Ui::PopupMenu>(
+			menu->parentWidget(),
+			menu->st());
+		const auto at = [=](const QString &text, Fn<TimeId()> when) {
+			return std::pair{ text, when };
+		};
+		const auto presets = std::vector{
+			at(u"Через 1 час"_q, [] { return base::unixtime::now() + 3600; }),
+			at(u"Через 3 часа"_q, [] {
+				return base::unixtime::now() + 3 * 3600;
+			}),
+			at(u"Сегодня в 20:00"_q, [] {
+				auto when = QDateTime(QDate::currentDate(), QTime(20, 0));
+				if (when <= QDateTime::currentDateTime().addSecs(60)) {
+					when = when.addDays(1);
+				}
+				return TimeId(when.toSecsSinceEpoch());
+			}),
+			at(u"Завтра в 9:00"_q, [] {
+				return TimeId(QDateTime(
+					QDate::currentDate().addDays(1),
+					QTime(9, 0)).toSecsSinceEpoch());
+			}),
+		};
+		for (const auto &[text, when] : presets) {
+			quick->addAction(text, [=] {
+				action({ Api::SendOptions{ .scheduled = when() } }, details);
+			});
+		}
+		menu->addAction(
+			u"Отправить позже"_q,
+			std::move(quick),
+			&icons.menuSchedule);
 	}
 	if (sending && type == Type::ScheduledToUser) {
 		menu->addAction(

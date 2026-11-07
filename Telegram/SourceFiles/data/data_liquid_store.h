@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <QtCore/QJsonValue>
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -70,6 +72,23 @@ void SetLastSeenVersion(const QString &version);
 // Live wallpaper: a video file path, a resource path or empty.
 [[nodiscard]] QString LiveWallpaper();
 void SetLiveWallpaper(const QString &path);
+
+// Twitch live statuses: the aglergram live service and its bot.
+struct Twitch {
+	QString server;
+	QString bot;
+	bool notify = true;
+};
+[[nodiscard]] Twitch TwitchSettings();
+void SetTwitchSettings(Twitch settings);
+
+// Any other small value of the fork: bookmarks, focus profiles, modes.
+[[nodiscard]] QJsonValue Value(const QString &key);
+void SetValue(const QString &key, const QJsonValue &value);
+[[nodiscard]] rpl::producer<QString> ValueChanges();
+
+// "user:peer" key, the same as for the notes.
+[[nodiscard]] QString PeerKey(not_null<Main::Session*> session, PeerId peer);
 
 // Text recognized on photos, per chat: message id -> text.
 [[nodiscard]] base::flat_map<MsgId, QString> RecognizedTexts(

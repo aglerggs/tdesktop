@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "base/timer.h"
 #include "core/application.h"
+#include "core/click_handler_types.h"
 #include "core/file_utilities.h"
 #include "data/data_liquid_store.h"
 #include "media/clip/media_clip_reader.h"
@@ -21,6 +22,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/checkbox.h"
+#include "ui/widgets/fields/input_field.h"
+#include "data/data_peer.h"
+#include "data/data_session.h"
+#include "history/history.h"
+#include "main/main_session.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/wrap/vertical_layout.h"
@@ -310,6 +317,55 @@ void ApplyWallpaper(const QString &path) {
 	state.frames.fire({});
 }
 
+// Twitch live statuses.
+
+struct TwitchState {
+	base::flat_map<PeerId, TwitchStream> live;
+	base::flat_set<PeerId> announced;
+	rpl::event_stream<> updates;
+	bool first = true;
+	base::weak_ptr<SessionController> controller;
+};
+
+TwitchState &CurrentTwitch() {
+	static auto result = TwitchState();
+	return result;
+}
+
+void AnnounceStreams(const base::flat_map<PeerId, TwitchStream> &fresh) {
+	auto &state = CurrentTwitch();
+	const auto controller = state.controller.get();
+	const auto notify = Data::LiquidStore::TwitchSettings().notify;
+	for (const auto &[peerId, stream] : fresh) {
+		if (state.announced.contains(peerId)) {
+			continue;
+		}
+		state.announced.emplace(peerId);
+		if (state.first || !notify || !controller) {
+			continue;
+		}
+		// Only people the user actually talks to.
+		const auto peer = controller->session().data().peerLoaded(peerId);
+		if (!peer || peer->isSelf()) {
+			continue;
+		}
+		const auto history = controller->session().data().historyLoaded(peer);
+		if (!history || history->isEmpty()) {
+			continue;
+		}
+		controller->showToast(
+			u"🔴 "_q + peer->shortName() + u" начал стрим: "_q + stream.title);
+	}
+	for (auto i = state.announced.begin(); i != state.announced.end();) {
+		if (!fresh.contains(*i)) {
+			i = state.announced.erase(i);
+		} else {
+			++i;
+		}
+	}
+	state.first = false;
+}
+
 // Backups.
 
 [[nodiscard]] QStringList BackupFiles() {
@@ -346,6 +402,10 @@ void StartUpdates(not_null<SessionController*> controller) {
 	started = true;
 	RemoveOldExe();
 	ApplyWallpaper(Data::LiquidStore::LiveWallpaper());
+	CurrentTwitch().controller = base::make_weak(controller);
+	RefreshTwitch();
+	static auto twitchTimer = base::Timer([] { RefreshTwitch(); });
+	twitchTimer.callEach(60 * crl::time(1000));
 
 	const auto current = CurrentVersion();
 	const auto seen = Data::LiquidStore::LastSeenVersion();
@@ -613,6 +673,117 @@ bool PaintLiveWallpaper(QPainter &p, QSize fill, QRect clip) {
 
 rpl::producer<> LiveWallpaperFrames() {
 	return CurrentWallpaper().frames.events();
+}
+
+const TwitchStream *TwitchStreamFor(PeerId peer) {
+	const auto &live = CurrentTwitch().live;
+	if (live.empty() || !peer.is<UserId>()) {
+		return nullptr;
+	}
+	const auto i = live.find(peer);
+	return (i != end(live)) ? &i->second : nullptr;
+}
+
+rpl::producer<> TwitchUpdates() {
+	return CurrentTwitch().updates.events();
+}
+
+// Live statuses come from the site: people link Twitch and Telegram
+// there and turn the showing on themselves.
+constexpr auto kTwitchSite = "https://blinistiy.fun";
+
+[[nodiscard]] QString TwitchServer() {
+	const auto custom = Data::LiquidStore::TwitchSettings().server.trimmed();
+	return custom.isEmpty()
+		? (QString::fromLatin1(kTwitchSite) + u"/api/aglergram"_q)
+		: custom;
+}
+
+void RefreshTwitch() {
+	auto server = TwitchServer();
+	while (server.endsWith('/')) {
+		server.chop(1);
+	}
+	if (!server.startsWith(u"http"_q)) {
+		server = u"https://"_q + server;
+	}
+	auto request = QNetworkRequest(QUrl(server + u"/live"_q));
+	request.setRawHeader("User-Agent", "aglergram");
+	const auto reply = Network().get(request);
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		if (reply->error() != QNetworkReply::NoError) {
+			return;
+		}
+		const auto object = QJsonDocument::fromJson(reply->readAll()).object();
+		auto fresh = base::flat_map<PeerId, TwitchStream>();
+		for (const auto value : object.value(u"live"_q).toArray()) {
+			const auto entry = value.toObject();
+			const auto id = entry.value(u"tg"_q).toString().toULongLong();
+			if (!id) {
+				continue;
+			}
+			fresh.emplace(peerFromUser(UserId(id)), TwitchStream{
+				.login = entry.value(u"login"_q).toString(),
+				.name = entry.value(u"name"_q).toString(),
+				.title = entry.value(u"title"_q).toString(),
+				.game = entry.value(u"game"_q).toString(),
+				.viewers = entry.value(u"viewers"_q).toInt(),
+			});
+		}
+		AnnounceStreams(fresh);
+		auto &state = CurrentTwitch();
+		const auto changed = (fresh.size() != state.live.size())
+			|| ranges::any_of(fresh, [&](const auto &pair) {
+				const auto i = state.live.find(pair.first);
+				return (i == end(state.live))
+					|| (i->second.title != pair.second.title)
+					|| (i->second.viewers != pair.second.viewers);
+			});
+		state.live = std::move(fresh);
+		if (changed) {
+			state.updates.fire({});
+		}
+	});
+}
+
+void ShowTwitchBox(not_null<SessionController*> controller) {
+	const auto settings = Data::LiquidStore::TwitchSettings();
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(u"Twitch в aglergram"_q));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			u"Друзья, которые стримят на Twitch, будут с красным кольцом "
+			"и значком LIVE в списке чатов, а в профиле — название стрима "
+			"и игра.\n\nЧтобы так показывался и твой эфир, открой "
+			"blinistiy.fun/aglergram: войди через Twitch, подключи "
+			"Telegram и включи «Показывать мой эфир»."_q,
+			st::boxLabel));
+		const auto notify = box->addRow(object_ptr<Ui::Checkbox>(
+			box,
+			u"Сообщать, когда друг начинает стрим"_q,
+			settings.notify,
+			st::defaultBoxCheckbox));
+		const auto save = [=] {
+			auto now = Data::LiquidStore::TwitchSettings();
+			now.notify = notify->checked();
+			Data::LiquidStore::SetTwitchSettings(now);
+			RefreshTwitch();
+		};
+		box->addButton(rpl::single(u"Показывать мой эфир"_q), [=] {
+			save();
+			box->closeBox();
+			UrlClickHandler::Open(
+				QString::fromLatin1(kTwitchSite) + u"/aglergram"_q,
+				QVariant::fromValue(ClickHandlerContext{
+					.sessionWindow = base::make_weak(controller),
+				}));
+		});
+		box->addButton(rpl::single(u"Сохранить"_q), [=] {
+			save();
+			box->closeBox();
+		});
+	}));
 }
 
 } // namespace Window::Liquid

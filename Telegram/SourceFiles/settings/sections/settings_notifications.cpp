@@ -733,7 +733,7 @@ NotifyPreview::NotifyPreview(bool nameShown, bool previewShown)
 	_name.setText(
 		st::defaultSubsectionTitle.style,
 		tr::lng_notification_preview_title(tr::now));
-	_title.setText(st::defaultSubsectionTitle.style, AppName.utf16());
+	_title.setText(st::defaultSubsectionTitle.style, AppDisplayName.utf16());
 
 	_text.setText(
 		st::boxTextStyle,

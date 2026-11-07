@@ -22,8 +22,8 @@ namespace Core {
 QString TrayIconToolTip() {
 	const auto counter = Core::App().unreadBadge();
 	return (counter > 0)
-		? u"%1 (%2)"_q.arg(AppName.utf16()).arg(counter)
-		: AppName.utf16();
+		? u"%1 (%2)"_q.arg(AppDisplayName.utf16()).arg(counter)
+		: AppDisplayName.utf16();
 }
 
 Tray::Tray() {
@@ -77,6 +77,16 @@ void Tray::create() {
 	}, _tray.lifetime());
 }
 
+namespace {
+
+// The cloud language pack names the app "Telegram", this is aglergram.
+[[nodiscard]] QString OwnName(QString text) {
+	return text.replace(u"Telegram Desktop"_q, u"aglergram"_q)
+		.replace(u"Telegram"_q, u"aglergram"_q);
+}
+
+} // namespace
+
 void Tray::rebuildMenu() {
 	_tray.destroyMenu();
 	_tray.createMenu();
@@ -86,8 +96,8 @@ void Tray::rebuildMenu() {
 		) | rpl::map([=] {
 			_activeForTrayIconAction = Core::App().isActiveForTrayMenu();
 			return _activeForTrayIconAction
-				? tr::lng_minimize_to_tray(tr::now)
-				: tr::lng_open_from_tray(tr::now);
+				? OwnName(tr::lng_minimize_to_tray(tr::now))
+				: OwnName(tr::lng_open_from_tray(tr::now));
 		});
 
 		_tray.addAction(
@@ -108,7 +118,9 @@ void Tray::rebuildMenu() {
 			[=] { toggleSoundNotifications(); });
 	}
 
-	_tray.addAction(tr::lng_quit_from_tray(), [] { Core::Quit(); });
+	_tray.addAction(
+		tr::lng_quit_from_tray() | rpl::map(OwnName),
+		[] { Core::Quit(); });
 
 	TrayAccountsMenu::Fill(_tray);
 

@@ -40,7 +40,7 @@ struct VideoQuality {
 };
 
 inline constexpr auto kSpeedMin = 0.5;
-inline constexpr auto kSpeedMax = 2.5;
+inline constexpr auto kSpeedMax = 3.0; // aglergram: up to 3x.
 inline constexpr auto kSpedUpDefault = 1.7;
 
 [[nodiscard]] inline bool ValidFrameSize(int w, int h, int maxArea) {

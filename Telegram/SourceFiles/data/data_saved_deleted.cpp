@@ -18,6 +18,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "ui/layers/generic_box.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/buttons.h"
+#include "ui/text/text_utilities.h"
+#include "styles/style_settings.h"
+
+#include <QtCore/QRegularExpression>
 #include "ui/vertical_list.h"
 #include "window/window_session_controller.h"
 #include "styles/style_layers.h"
@@ -106,6 +111,74 @@ void WriteJson(const QString &path, const QJsonObject &object) {
 }
 
 base::flat_map<QString, std::vector<Entry>> DeletedCache;
+base::flat_map<QString, base::flat_map<MsgId, int>> EditsCountCache;
+
+// Word level diff: removed words are struck out, added ones are bold.
+[[nodiscard]] TextWithEntities DiffText(
+		const QString &was,
+		const QString &now) {
+	static const auto splitter = QRegularExpression(u"(\\s+)"_q);
+	const auto tokens = [](const QString &text) {
+		auto result = QStringList();
+		auto last = 0;
+		auto it = splitter.globalMatch(text);
+		while (it.hasNext()) {
+			const auto match = it.next();
+			if (match.capturedStart() > last) {
+				result.push_back(text.mid(last, match.capturedStart() - last));
+			}
+			result.push_back(match.captured());
+			last = match.capturedEnd();
+		}
+		if (last < text.size()) {
+			result.push_back(text.mid(last));
+		}
+		return result;
+	};
+	const auto a = tokens(was);
+	const auto b = tokens(now);
+	if (a.size() * b.size() > 4'000'000) {
+		return { now };
+	}
+	auto lcs = std::vector<std::vector<int>>(
+		a.size() + 1,
+		std::vector<int>(b.size() + 1, 0));
+	for (auto i = int(a.size()) - 1; i >= 0; --i) {
+		for (auto j = int(b.size()) - 1; j >= 0; --j) {
+			lcs[i][j] = (a[i] == b[j])
+				? (lcs[i + 1][j + 1] + 1)
+				: std::max(lcs[i + 1][j], lcs[i][j + 1]);
+		}
+	}
+	auto result = TextWithEntities();
+	const auto append = [&](const QString &text, std::optional<EntityType> type) {
+		const auto offset = int(result.text.size());
+		result.text.append(text);
+		if (type && !text.trimmed().isEmpty()) {
+			result.entities.push_back({ *type, offset, int(text.size()) });
+		}
+	};
+	auto i = 0;
+	auto j = 0;
+	while (i < a.size() && j < b.size()) {
+		if (a[i] == b[j]) {
+			append(a[i], std::nullopt);
+			++i;
+			++j;
+		} else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+			append(a[i++], EntityType::StrikeOut);
+		} else {
+			append(b[j++], EntityType::Bold);
+		}
+	}
+	while (i < a.size()) {
+		append(a[i++], EntityType::StrikeOut);
+	}
+	while (j < b.size()) {
+		append(b[j++], EntityType::Bold);
+	}
+	return result;
+}
 
 [[nodiscard]] QString CacheKey(not_null<Main::Session*> session, PeerId peer) {
 	return QString::number(session->userId().bare)
@@ -128,6 +201,7 @@ void Append(
 	object.insert(key, list);
 	WriteJson(path, object);
 	DeletedCache.remove(CacheKey(session, peer));
+	EditsCountCache.remove(CacheKey(session, peer));
 }
 
 [[nodiscard]] std::vector<Entry> Load(
@@ -398,7 +472,123 @@ void ShowDeletedBox(
 void ShowEditsBox(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item) {
-	ShowEntriesBox(controller, u"История правок"_q, Edits(item), true);
+	auto versions = Edits(item);
+	ranges::sort(versions, ranges::less(), &Entry::changed);
+	const auto current = ItemText(item);
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(u"История правок"_q));
+		box->setWidth(st::boxWideWidth);
+		if (versions.empty()) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				u"Пока ничего не сохранено."_q,
+				st::boxLabel));
+		}
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			u"Зачёркнуто — убрали, жирным — добавили."_q,
+			st::boxDividerLabel));
+		Ui::AddSkip(box->verticalLayout());
+		// Newest change first: each version compared with the one before.
+		for (auto i = int(versions.size()); i > 0; --i) {
+			const auto &was = versions[i - 1];
+			const auto now = (i == int(versions.size()))
+				? current
+				: versions[i].text;
+			const auto when = (i == int(versions.size()))
+				? u"Сейчас"_q
+				: (u"Версия от "_q + FormatTime(versions[i].date));
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				when + u" (было от "_q + FormatTime(was.date) + ')',
+				st::boxDividerLabel));
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				rpl::single(DiffText(was.text, now)),
+				st::boxLabel));
+			Ui::AddSkip(box->verticalLayout());
+		}
+		if (!versions.empty()) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				u"Самая первая версия"_q,
+				st::boxDividerLabel));
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				versions.front().text.isEmpty()
+					? u"(без текста)"_q
+					: versions.front().text,
+				st::boxLabel));
+		}
+		box->setMaxHeight(st::boxMaxListHeight * 2);
+		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+	}));
+}
+
+int EditsCount(not_null<const HistoryItem*> item) {
+	if (!Enabled() || !item->isRegular()) {
+		return 0;
+	}
+	const auto history = item->history();
+	const auto key = CacheKey(&history->session(), history->peer->id);
+	auto i = EditsCountCache.find(key);
+	if (i == end(EditsCountCache)) {
+		auto counts = base::flat_map<MsgId, int>();
+		for (const auto &entry : Load(
+				&history->session(),
+				history->peer->id,
+				u"edits"_q)) {
+			++counts[entry.id];
+		}
+		i = EditsCountCache.emplace(key, std::move(counts)).first;
+	}
+	const auto j = i->second.find(item->id);
+	return (j != end(i->second)) ? j->second : 0;
+}
+
+void ShowAllEditsBox(
+		not_null<Window::SessionController*> controller,
+		not_null<PeerData*> peer) {
+	auto entries = Load(&peer->session(), peer->id, u"edits"_q);
+	ranges::sort(entries, ranges::greater(), &Entry::changed);
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(u"Все правки в чате"_q));
+		box->setWidth(st::boxWideWidth);
+		if (entries.empty()) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				u"Пока никто ничего не менял."_q,
+				st::boxLabel));
+		}
+		auto shown = 0;
+		for (const auto &entry : entries) {
+			if (++shown > 200) {
+				break;
+			}
+			const auto id = entry.id;
+			const auto text = entry.text.simplified();
+			const auto label = entry.author
+				+ u" · "_q
+				+ FormatTime(entry.changed)
+				+ u" — было: "_q
+				+ (text.size() > 80 ? (text.mid(0, 77) + u"..."_q) : text);
+			const auto button = box->addRow(
+				object_ptr<Ui::SettingsButton>(
+					box,
+					rpl::single(label),
+					st::settingsButtonNoIcon),
+				style::margins());
+			button->setClickedCallback([=] {
+				box->closeBox();
+				controller->showPeerHistory(
+					peer,
+					Window::SectionShow::Way::Forward,
+					id);
+			});
+		}
+		box->setMaxHeight(st::boxMaxListHeight * 2);
+		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+	}));
 }
 
 } // namespace Data::SavedDeleted

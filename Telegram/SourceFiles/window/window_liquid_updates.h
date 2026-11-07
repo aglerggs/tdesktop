@@ -31,4 +31,17 @@ void ShowLiveWallpaperBox(not_null<SessionController*> controller);
 [[nodiscard]] bool LiveWallpaperActive();
 [[nodiscard]] rpl::producer<> LiveWallpaperFrames();
 
+// Twitch live statuses from the aglergram live service.
+struct TwitchStream {
+	QString login;
+	QString name;
+	QString title;
+	QString game;
+	int viewers = 0;
+};
+[[nodiscard]] const TwitchStream *TwitchStreamFor(PeerId peer);
+[[nodiscard]] rpl::producer<> TwitchUpdates();
+void RefreshTwitch();
+void ShowTwitchBox(not_null<SessionController*> controller);
+
 } // namespace Window::Liquid

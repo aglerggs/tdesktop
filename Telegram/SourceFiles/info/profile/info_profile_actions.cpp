@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_actions.h"
 
 #include "data/data_liquid_store.h"
+#include "window/window_liquid_updates.h"
 
 #include "api/api_blocked_peers.h"
 #include "api/api_chat_participants.h"
@@ -1677,6 +1678,29 @@ Section DetailsFiller::makeInfo() {
 				}
 			});
 	};
+	if (_peer->isUser()) {
+		// aglergram: the Twitch stream, while it is live.
+		const auto peerId = _peer->id;
+		addInfoLine(
+			rpl::single(u"Twitch"_q),
+			rpl::single(rpl::empty) | rpl::then(
+				Window::Liquid::TwitchUpdates()
+			) | rpl::map([=] {
+				const auto stream = Window::Liquid::TwitchStreamFor(peerId);
+				if (!stream) {
+					return TextWithEntities();
+				}
+				auto result = TextWithEntities{ u"🔴 В эфире: "_q };
+				result.append(Ui::Text::Link(
+					stream->title.isEmpty() ? stream->name : stream->title,
+					u"https://twitch.tv/"_q + stream->login));
+				result.append(u"\n"_q
+					+ (stream->game.isEmpty() ? QString() : (stream->game + u" · "_q))
+					+ QString::number(stream->viewers)
+					+ u" зрителей"_q);
+				return result;
+			}));
+	}
 	{
 		// Liquid glass fork: the private note about this chat.
 		addInfoLine(

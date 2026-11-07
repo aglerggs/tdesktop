@@ -27,7 +27,10 @@ struct State {
 	QString translateTo = u"en"_q;
 	QString lastSeenVersion;
 	QString liveWallpaper;
+	Twitch twitch;
+	QJsonObject extra;
 	rpl::event_stream<> notesChanged;
+	rpl::event_stream<QString> valueChanges;
 };
 
 State &Current() {
@@ -76,6 +79,12 @@ void Save() {
 		{ u"translateTo"_q, state.translateTo },
 		{ u"lastSeenVersion"_q, state.lastSeenVersion },
 		{ u"liveWallpaper"_q, state.liveWallpaper },
+		{ u"twitch"_q, QJsonObject{
+			{ u"server"_q, state.twitch.server },
+			{ u"bot"_q, state.twitch.bot },
+			{ u"notify"_q, state.twitch.notify },
+		} },
+		{ u"extra"_q, state.extra },
 	};
 	auto file = QFile(state.folder + u"liquid_store.json"_q);
 	if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -133,6 +142,34 @@ void Load(const QString &folder) {
 	state.translateTo = object.value(u"translateTo"_q).toString(u"en"_q);
 	state.lastSeenVersion = object.value(u"lastSeenVersion"_q).toString();
 	state.liveWallpaper = object.value(u"liveWallpaper"_q).toString();
+	const auto twitch = object.value(u"twitch"_q).toObject();
+	state.twitch.server = twitch.value(u"server"_q).toString();
+	state.twitch.bot = twitch.value(u"bot"_q).toString();
+	state.twitch.notify = twitch.value(u"notify"_q).toBool(true);
+	state.extra = object.value(u"extra"_q).toObject();
+}
+
+QJsonValue Value(const QString &key) {
+	return Current().extra.value(key);
+}
+
+void SetValue(const QString &key, const QJsonValue &value) {
+	auto &state = Current();
+	if (value.isUndefined() || value.isNull()) {
+		state.extra.remove(key);
+	} else {
+		state.extra.insert(key, value);
+	}
+	Save();
+	state.valueChanges.fire_copy(key);
+}
+
+rpl::producer<QString> ValueChanges() {
+	return Current().valueChanges.events();
+}
+
+QString PeerKey(not_null<Main::Session*> session, PeerId peer) {
+	return NoteKey(session, peer);
 }
 
 QString Folder() {
@@ -231,6 +268,15 @@ QString LastSeenVersion() {
 
 void SetLastSeenVersion(const QString &version) {
 	Current().lastSeenVersion = version;
+	Save();
+}
+
+Twitch TwitchSettings() {
+	return Current().twitch;
+}
+
+void SetTwitchSettings(Twitch settings) {
+	Current().twitch = std::move(settings);
 	Save();
 }
 

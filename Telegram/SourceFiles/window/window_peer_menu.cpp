@@ -1105,6 +1105,9 @@ void Filler::addLiquidFeatures() {
 	const auto controller = _controller;
 	const auto history = peer->owner().history(peer);
 	const auto thread = _thread;
+	_addAction(u"Все правки"_q, [=] {
+		Data::SavedDeleted::ShowAllEditsBox(controller, peer);
+	}, &st::menuIconEdit);
 	_addAction(u"Заметка о чате"_q, [=] {
 		Window::Liquid::ShowNoteBox(controller, peer);
 	}, &st::menuIconEdit);

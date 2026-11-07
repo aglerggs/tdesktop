@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/ui/dialogs_layout.h"
 
+#include "window/window_liquid_updates.h"
+
 #include "base/options.h"
 #include "base/unixtime.h"
 #include "core/ui_integration.h"
@@ -583,6 +585,40 @@ void PaintRow(
 				&& !draft
 				&& item
 				&& !item->isEmpty()));
+	}
+
+	if (from) {
+		if (Window::Liquid::TwitchStreamFor(from->id)) {
+			// aglergram: a Twitch stream is live, red ring and a LIVE pill.
+			auto hq = PainterHighQualityEnabler(p);
+			const auto size = context.st->photoSize;
+			const auto photo = QRectF(
+				context.st->padding.left(),
+				context.st->padding.top(),
+				size,
+				size);
+			const auto red = QColor(0xFF, 0x3B, 0x5C);
+			p.setBrush(Qt::NoBrush);
+			p.setPen(QPen(red, 2.));
+			p.drawEllipse(photo.marginsAdded({ 1.5, 1.5, 1.5, 1.5 }));
+			auto font = st::semiboldFont->f;
+			font.setPixelSize(std::max(8, size / 6));
+			const auto metrics = QFontMetrics(font);
+			const auto text = u"LIVE"_q;
+			const auto w = metrics.horizontalAdvance(text) + 8.;
+			const auto h = metrics.height() + 1.;
+			const auto pill = QRectF(
+				photo.center().x() - w / 2.,
+				photo.bottom() - h / 2.,
+				w,
+				h);
+			p.setPen(QPen(st::dialogsBg, 1.5));
+			p.setBrush(red);
+			p.drawRoundedRect(pill, h / 2., h / 2.);
+			p.setPen(QColor(255, 255, 255));
+			p.setFont(font);
+			p.drawText(pill, Qt::AlignCenter, text);
+		}
 	}
 
 	const auto nameleft = context.st->nameLeft;

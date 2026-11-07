@@ -57,6 +57,10 @@ void SetupFieldFeatures(
 	not_null<Ui::InputField*> field,
 	Fn<SessionController*()> controller);
 
+// Unread: a folder with only unread chats and marking everything read.
+void CreateUnreadFolder(not_null<SessionController*> controller);
+void ReadAllChats(not_null<SessionController*> controller);
+
 // Settings boxes.
 void ShowTemplatesBox(not_null<SessionController*> controller);
 void ShowSunsetBox(not_null<SessionController*> controller);

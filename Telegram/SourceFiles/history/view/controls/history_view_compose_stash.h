@@ -30,6 +30,10 @@ namespace SendMenu {
 struct Details;
 } // namespace SendMenu
 
+namespace Ui {
+class PopupMenu;
+} // namespace Ui
+
 namespace HistoryView {
 class CornerButtons;
 } // namespace HistoryView
@@ -75,6 +79,8 @@ private:
 	void applyStash(Data::ComposeStash &&stash);
 	void keepFiles(Ui::PreparedList &&files);
 	void remove();
+	void fillListMenu(not_null<Ui::PopupMenu*> menu);
+	void restoreAt(int index);
 	void sendStashed(Api::SendOptions options);
 
 	const StashManagerDescriptor _data;

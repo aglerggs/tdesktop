@@ -271,8 +271,10 @@ void Tray::addAction(rpl::producer<QString> text, Fn<void()> &&callback) {
 void Tray::showTrayMessage() const {
 	if (!cSeenTrayTooltip() && _icon) {
 		_icon->showMessage(
-			AppName.utf16(),
-			tr::lng_tray_icon_text(tr::now),
+			AppDisplayName.utf16(),
+			tr::lng_tray_icon_text(tr::now).replace(
+				u"Telegram"_q,
+				u"aglergram"_q),
 			QIcon(),
 			QPlatformSystemTrayIcon::Information,
 			kTooltipDelay);

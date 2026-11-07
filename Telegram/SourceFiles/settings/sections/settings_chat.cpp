@@ -65,6 +65,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_saved_deleted.h"
 #include "data/data_liquid_store.h"
 #include "window/window_liquid_features.h"
+#include "window/window_liquid_extras.h"
+#include "storage/storage_domain.h"
+#include "main/main_domain.h"
 #include "window/window_liquid_updates.h"
 #include "ui/widgets/continuous_sliders.h"
 
@@ -913,6 +916,49 @@ void SetupLiquidGlass(
 			st::settingsButtonNoIcon));
 		button->setClickedCallback(std::move(callback));
 	};
+	addLiquidButton(u"Командная палитра (Ctrl+Shift+K)"_q, [=] {
+		Window::Liquid::ShowCommandPalette(controller);
+	});
+	addLiquidButton(u"🔖 Закладки"_q, [=] {
+		Window::Liquid::ShowBookmarksBox(controller);
+	});
+	addLiquidButton(u"📝 Все черновики"_q, [=] {
+		Window::Liquid::ShowAllDraftsBox(controller);
+	});
+	addLiquidButton(u"🎯 Профили фокуса"_q, [=] {
+		Window::Liquid::ShowFocusBox(controller);
+	});
+	{
+		const auto lock = container->add(object_ptr<Ui::SettingsButton>(
+			container,
+			rpl::single(u"Блокировать при смене мониторов"_q),
+			st::settingsButtonNoIcon));
+		lock->toggleOn(rpl::single(Window::Liquid::LockOnScreensChange()));
+		lock->toggledChanges() | rpl::on_next([=](bool enabled) {
+			Window::Liquid::SetLockOnScreensChange(enabled);
+			if (enabled
+				&& !controller->session().domain().local().hasLocalPasscode()) {
+				controller->showToast(u"Сначала поставь код-пароль: "
+					"Настройки → Конфиденциальность → Код-пароль"_q);
+			}
+		}, lock->lifetime());
+	}
+	addLiquidButton(u"Twitch: эфиры друзей и привязка"_q, [=] {
+		Window::Liquid::ShowTwitchBox(controller);
+	});
+	addLiquidButton(u"Создать папку «Непрочитанное»"_q, [=] {
+		Window::Liquid::CreateUnreadFolder(controller);
+	});
+	addLiquidButton(u"Прочитать все чаты"_q, [=] {
+		controller->show(Ui::MakeConfirmBox({
+			.text = u"Отметить все чаты прочитанными?"_q,
+			.confirmed = [=](Fn<void()> close) {
+				close();
+				Window::Liquid::ReadAllChats(controller);
+			},
+			.confirmText = u"Прочитать"_q,
+		}));
+	});
 	addLiquidButton(u"Живые обои"_q, [=] {
 		Window::Liquid::ShowLiveWallpaperBox(controller);
 	});
