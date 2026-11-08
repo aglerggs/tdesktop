@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_compose_controls.h"
 
 #include "window/window_liquid_convert.h"
+#include "window/window_liquid_text_modes.h"
 
 #include "window/window_liquid_features.h"
 
@@ -2168,7 +2169,29 @@ auto ComposeControls::sendContentRequests(SendRequestType requestType) const {
 		const auto sendRequestType = _voiceRecordBar->isListenState()
 			? SendRequestType::Voice
 			: SendRequestType::Text;
-		return (sendRequestType == requestType);
+		if (sendRequestType != requestType) {
+			return false;
+		} else if (requestType != SendRequestType::Text) {
+			return true;
+		}
+		// aglergram: text modes and dot commands, before the text leaves.
+		const auto text = _field->getTextWithTags().text;
+		const auto applied = _field->property("aglergramApplied").toString();
+		if (!applied.isEmpty() && text == applied) {
+			return true;
+		}
+		const auto result = Window::Liquid::TransformOutgoing(text);
+		if (!result.toast.isEmpty()) {
+			_show->showToast(result.toast);
+		}
+		if (result.swallow) {
+			_field->clear();
+			return false;
+		} else if (result.changed) {
+			_field->setTextWithTags({ result.text });
+			_field->setProperty("aglergramApplied", result.text);
+		}
+		return true;
 	});
 	auto custom = rpl::filter([=] {
 		const auto sendRequestType = _voiceRecordBar->isListenState()
@@ -3256,6 +3279,15 @@ void ComposeControls::initKeyHandler() {
 }
 
 void ComposeControls::initField() {
+	// aglergram: right click on the field -> text modes and commands.
+	_field->addContextMenuHook([=](Ui::InputField::ContextMenuRequest request) {
+		request.customizePopupMenu([=](not_null<Ui::PopupMenu*> menu) {
+			Window::Liquid::FillTextModeMenu(menu, [=](QString command) {
+				_field->setTextWithTags({ command + ' ' });
+				_field->setFocus();
+			});
+		});
+	});
 	_field->setMaxHeight(st::historyComposeFieldMaxHeight);
 	Window::Liquid::SetupFieldFeatures(_field, [show = _show] {
 		return show->resolveWindow();

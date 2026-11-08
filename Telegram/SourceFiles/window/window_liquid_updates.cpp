@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_liquid_updates.h"
 
+#include "window/window_liquid_aura.h"
+
 #include "base/call_delayed.h"
 #include "base/timer.h"
 #include "core/application.h"
@@ -38,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_settings.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
@@ -259,6 +262,8 @@ struct Wallpaper {
 	::Media::Clip::FrameRequest request;
 	QImage frame;
 	QString path;
+	int attempts = 0;
+	std::unique_ptr<base::Timer> drawn;
 	rpl::event_stream<> frames;
 };
 
@@ -267,16 +272,79 @@ Wallpaper &CurrentWallpaper() {
 	return result;
 }
 
-void ApplyWallpaper(const QString &path) {
+[[nodiscard]] bool IsPicture(const QString &path) {
+	static const auto kSuffixes = QStringList{
+		u"png"_q, u"jpg"_q, u"jpeg"_q, u"webp"_q, u"bmp"_q,
+	};
+	return kSuffixes.contains(QFileInfo(path).suffix().toLower());
+}
+
+void ShowPicture(const QString &path) {
 	auto &state = CurrentWallpaper();
-	if (state.path == path && (state.reader || path.isEmpty())) {
+	auto image = QImage(path);
+	if (image.isNull()) {
+		LOG(("aglergram: wallpaper picture not loaded: %1").arg(path));
+	} else {
+		constexpr auto kMaxSide = 2560;
+		if (std::max(image.width(), image.height()) > kMaxSide) {
+			image = image.scaled(
+				kMaxSide,
+				kMaxSide,
+				Qt::KeepAspectRatio,
+				Qt::SmoothTransformation);
+		}
+		state.frame = std::move(image);
+	}
+	state.frames.fire({});
+}
+
+// Drawn wallpapers: a frame is painted in the background ~24 times a
+// second, the main thread only takes the ready picture.
+void StartDrawnWallpaper(const QString &path) {
+	auto &state = CurrentWallpaper();
+	const auto started = crl::now();
+	const auto busy = std::make_shared<bool>(false);
+	state.drawn = std::make_unique<base::Timer>([=] {
+		if (*busy || CurrentWallpaper().path != path) {
+			return;
+		}
+		*busy = true;
+		const auto ms = crl::now() - started;
+		crl::async([=] {
+			auto frame = RenderAuraFrame(path, ms);
+			crl::on_main([=, frame = std::move(frame)]() mutable {
+				*busy = false;
+				auto &state = CurrentWallpaper();
+				if (state.path == path && !frame.isNull()) {
+					state.frame = std::move(frame);
+					state.frames.fire({});
+				}
+			});
+		});
+	});
+	state.drawn->callEach(crl::time(42));
+}
+
+void ApplyWallpaper(const QString &path, bool retry = false) {
+	auto &state = CurrentWallpaper();
+	if (!retry && state.path == path && (state.reader || path.isEmpty())) {
 		return;
+	}
+	if (!retry) {
+		state.attempts = 0;
 	}
 	state.path = path;
 	state.reader = nullptr;
 	state.frame = QImage();
+	state.drawn = nullptr;
 	if (path.isEmpty()) {
 		state.frames.fire({});
+		return;
+	} else if (IsAuraPath(path)) {
+		StartDrawnWallpaper(path);
+		return;
+	} else if (IsPicture(path)) {
+		ShowPicture(path);
 		return;
 	}
 	const auto callback = [](::Media::Clip::Notification notification) {
@@ -306,15 +374,111 @@ void ApplyWallpaper(const QString &path) {
 			state.frames.fire({});
 		}
 	};
-	if (path.startsWith(':')) {
-		auto file = QFile(path);
-		if (file.open(QIODevice::ReadOnly)) {
-			state.reader = ::Media::Clip::MakeReader(file.readAll(), callback);
-		}
-	} else if (QFileInfo::exists(path)) {
-		state.reader = ::Media::Clip::MakeReader(path, callback);
+	// Read into memory: no file kept locked, any path characters work.
+	auto file = QFile(path);
+	if (file.open(QIODevice::ReadOnly)) {
+		state.reader = ::Media::Clip::MakeReader(file.readAll(), callback);
+	} else {
+		LOG(("aglergram: live wallpaper not found: %1").arg(path));
 	}
 	state.frames.fire({});
+}
+
+// The first start of the reader right at the launch sometimes gives no
+// frames, so it is started again until the first frame comes.
+void WatchWallpaper() {
+	static auto timer = base::Timer([] {
+		auto &state = CurrentWallpaper();
+		if (state.path.isEmpty()
+			|| !state.frame.isNull()
+			|| IsAuraPath(state.path)) {
+			return;
+		}
+		if (++state.attempts > 6) {
+			return;
+		}
+		LOG(("aglergram: live wallpaper restart %1").arg(state.attempts));
+		ApplyWallpaper(state.path, true);
+	});
+	timer.callEach(4 * crl::time(1000));
+}
+
+// Own videos live in their own folder with unique names, so choosing a
+// new one never deletes the file that is playing right now.
+// Recent own wallpapers: copies in tdata, newest first, so switching
+// between them needs no new upload.
+constexpr auto kRecentWallpapersKey = "recentWallpapers";
+constexpr auto kMaxRecentWallpapers = 12;
+
+[[nodiscard]] QString RecentFolder() {
+	return Data::LiquidStore::Folder() + u"liquid_wallpapers/"_q;
+}
+
+[[nodiscard]] QStringList RecentWallpapers() {
+	auto result = QStringList();
+	const auto list = Data::LiquidStore::Value(
+		QString::fromLatin1(kRecentWallpapersKey)).toArray();
+	for (const auto value : list) {
+		const auto path = value.toString();
+		if (QFileInfo::exists(path) && !result.contains(path)) {
+			result.push_back(path);
+		}
+	}
+	return result;
+}
+
+void SaveRecentWallpapers(QStringList list) {
+	// Files that fell out of the list are not needed anymore.
+	while (list.size() > kMaxRecentWallpapers) {
+		const auto dropped = list.takeLast();
+		if (dropped.startsWith(RecentFolder())
+			&& dropped != Data::LiquidStore::LiveWallpaper()) {
+			QFile::remove(dropped);
+		}
+	}
+	auto array = QJsonArray();
+	for (const auto &path : list) {
+		array.push_back(path);
+	}
+	Data::LiquidStore::SetValue(
+		QString::fromLatin1(kRecentWallpapersKey),
+		array.isEmpty() ? QJsonValue() : QJsonValue(array));
+}
+
+void ForgetRecentWallpaper(const QString &path) {
+	auto list = RecentWallpapers();
+	list.removeAll(path);
+	SaveRecentWallpapers(list);
+	if (path.startsWith(RecentFolder())
+		&& path != Data::LiquidStore::LiveWallpaper()) {
+		QFile::remove(path);
+	}
+}
+
+// Copies a chosen file into tdata (the original may be moved) and puts
+// it on top of the recent ones.
+[[nodiscard]] QString AddRecentWallpaper(const QString &source) {
+	QDir().mkpath(RecentFolder());
+	const auto target = RecentFolder()
+		+ QString::number(QDateTime::currentMSecsSinceEpoch())
+		+ '_'
+		+ QFileInfo(source).fileName();
+	const auto path = QFile::copy(source, target) ? target : source;
+	auto list = RecentWallpapers();
+	list.removeAll(path);
+	list.push_front(path);
+	SaveRecentWallpapers(list);
+	return path;
+}
+
+// The file name without the time prefix added on copying.
+[[nodiscard]] QString RecentTitle(const QString &path) {
+	auto name = QFileInfo(path).fileName();
+	const auto underscore = name.indexOf('_');
+	if (underscore > 0 && name.left(underscore).toLongLong() > 0) {
+		name = name.mid(underscore + 1);
+	}
+	return name;
 }
 
 // Twitch live statuses.
@@ -401,7 +565,21 @@ void StartUpdates(not_null<SessionController*> controller) {
 	}
 	started = true;
 	RemoveOldExe();
+	{
+		// An own wallpaper chosen before «Недавние» existed goes there too.
+		const auto path = Data::LiquidStore::LiveWallpaper();
+		if (!path.isEmpty()
+			&& !path.startsWith(':')
+			&& !IsAuraPath(path)
+			&& QFileInfo::exists(path)
+			&& !RecentWallpapers().contains(path)) {
+			auto list = RecentWallpapers();
+			list.push_front(path);
+			SaveRecentWallpapers(list);
+		}
+	}
 	ApplyWallpaper(Data::LiquidStore::LiveWallpaper());
+	WatchWallpaper();
 	CurrentTwitch().controller = base::make_weak(controller);
 	RefreshTwitch();
 	static auto twitchTimer = base::Timer([] { RefreshTwitch(); });
@@ -577,15 +755,16 @@ void ImportBackup(not_null<SessionController*> controller) {
 void ShowLiveWallpaperBox(not_null<SessionController*> controller) {
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(rpl::single(u"Живые обои"_q));
+		box->setWidth(st::boxWideWidth);
 		const auto current = Data::LiquidStore::LiveWallpaper();
-		box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			current.isEmpty()
-				? u"Сейчас: обычный фон чата."_q
-				: (current == QString::fromLatin1(kSnowLeopard))
-				? u"Сейчас: «Снежный барс»."_q
-				: (u"Сейчас: "_q + QFileInfo(current).fileName()),
-			st::boxLabel));
+		const auto choose = [=](const QString &path) {
+			Data::LiquidStore::SetLiveWallpaper(path);
+			ApplyWallpaper(path);
+			box->closeBox();
+		};
+		const auto mark = [=](const QString &path, const QString &text) {
+			return ((path == current) ? u"✓ "_q : QString()) + text;
+		};
 		const auto add = [&](const QString &text, Fn<void()> callback) {
 			const auto button = box->addRow(
 				object_ptr<Ui::SettingsButton>(
@@ -595,45 +774,70 @@ void ShowLiveWallpaperBox(not_null<SessionController*> controller) {
 				style::margins());
 			button->setClickedCallback(std::move(callback));
 		};
-		add(u"🐆 Снежный барс"_q, [=] {
-			Data::LiquidStore::SetLiveWallpaper(QString::fromLatin1(kSnowLeopard));
-			ApplyWallpaper(QString::fromLatin1(kSnowLeopard));
-			box->closeBox();
-		});
-		add(u"🎞 Своё видео или GIF…"_q, [=] {
-			const auto weak = base::make_weak(controller);
+		const auto header = [&](const QString &text) {
+			box->addRow(object_ptr<Ui::FlatLabel>(
+				box,
+				text,
+				st::boxDividerLabel));
+		};
+
+		header(u"Встроенные"_q);
+		const auto leopard = QString::fromLatin1(kSnowLeopard);
+		add(mark(leopard, u"🐆 Снежный барс"_q), [=] { choose(leopard); });
+		for (const auto &preset : AuraPresets()) {
+			const auto path = AuraPath(preset.id);
+			add(mark(path, preset.title), [=] { choose(path); });
+		}
+
+		const auto recent = RecentWallpapers();
+		if (!recent.isEmpty()) {
+			header(u"Недавние — свои, хранятся только на этом компьютере"_q);
+			for (const auto &path : recent) {
+				const auto icon = IsPicture(path) ? u"🖼 "_q : u"🎞 "_q;
+				add(mark(path, icon + RecentTitle(path)), [=] {
+					auto list = RecentWallpapers();
+					list.removeAll(path);
+					list.push_front(path);
+					SaveRecentWallpapers(list);
+					choose(path);
+				});
+				add(u"      убрать из недавних"_q, [=] {
+					if (Data::LiquidStore::LiveWallpaper() == path) {
+						Data::LiquidStore::SetLiveWallpaper(QString());
+						ApplyWallpaper(QString());
+					}
+					ForgetRecentWallpaper(path);
+					box->closeBox();
+					ShowLiveWallpaperBox(controller);
+				});
+			}
+		}
+
+		header(u"Своё"_q);
+		add(u"➕ Добавить видео, GIF или картинку…"_q, [=] {
 			FileDialog::GetOpenPath(
 				controller->widget().get(),
 				u"Живые обои"_q,
-				u"Видео (*.mp4 *.webm *.mov *.gif)"_q,
+				u"Видео и картинки "
+				"(*.mp4 *.webm *.mov *.gif *.png *.jpg *.jpeg *.webp *.bmp)"_q,
 				[=](FileDialog::OpenResult &&result) {
 					if (result.paths.isEmpty()) {
 						return;
 					}
-					// Keep a copy in tdata, the original may be moved.
-					const auto source = result.paths.front();
-					const auto target = Data::LiquidStore::Folder()
-						+ u"liquid_wallpaper."_q
-						+ QFileInfo(source).suffix().toLower();
-					QFile::remove(target);
-					const auto path = QFile::copy(source, target)
-						? target
-						: source;
+					const auto path = AddRecentWallpaper(result.paths.front());
 					Data::LiquidStore::SetLiveWallpaper(path);
 					ApplyWallpaper(path);
 				});
 			box->closeBox();
 		});
-		add(u"Убрать живые обои"_q, [=] {
-			Data::LiquidStore::SetLiveWallpaper(QString());
-			ApplyWallpaper(QString());
-			box->closeBox();
-		});
+		add(mark(QString(), u"Без живых обоев"_q), [=] { choose(QString()); });
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
-			u"Видео крутится по кругу без звука и подстраивается под окно, "
-			"стекло размывает его в шапке и поле ввода."_q,
+			u"Видео крутится по кругу без звука, стекло размывает его в шапке "
+			"и поле ввода. Добавленные обои остаются в «Недавних» — менять "
+			"их можно без повторной загрузки."_q,
 			st::boxDividerLabel));
+		box->setMaxHeight(st::boxMaxListHeight * 2);
 		box->addButton(rpl::single(u"Готово"_q), [=] { box->closeBox(); });
 	}));
 }

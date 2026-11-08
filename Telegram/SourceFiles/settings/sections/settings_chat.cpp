@@ -67,6 +67,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_liquid_features.h"
 #include "window/window_liquid_extras.h"
 #include "window/window_liquid_convert.h"
+#include "window/window_liquid_text_modes.h"
 #include "storage/storage_domain.h"
 #include "main/main_domain.h"
 #include "window/window_liquid_updates.h"
@@ -928,6 +929,9 @@ void SetupLiquidGlass(
 	});
 	addLiquidButton(u"🎯 Профили фокуса"_q, [=] {
 		Window::Liquid::ShowFocusBox(controller);
+	});
+	addLiquidButton(u"✨ Свои команды для поля ввода"_q, [=] {
+		Window::Liquid::ShowTextCommandsBox(controller);
 	});
 	addLiquidButton(u"⚡ Быстрые ответы"_q, [=] {
 		Window::Liquid::ShowQuickRepliesBox(controller);

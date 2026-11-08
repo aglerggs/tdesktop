@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_liquid_features.h"
 #include "window/window_liquid_updates.h"
 #include "window/window_liquid_convert.h"
+#include "window/window_liquid_text_modes.h"
 
 #include "apiwrap.h"
 #include "base/unixtime.h"
@@ -345,6 +346,9 @@ struct Command {
 	});
 	add(u"🎞 Видео в GIF"_q, u"gif гиф видео"_q, [=] {
 		ConvertFromFile(controller, ConvertKind::Gif);
+	});
+	add(u"✨ Свои команды"_q, u"commands команды точка kawaii"_q, [=] {
+		ShowTextCommandsBox(controller);
 	});
 	add(u"⚡ Быстрые ответы"_q, u"quick быстрые ответы фразы кнопки"_q, [=] {
 		ShowQuickRepliesBox(controller);

@@ -216,19 +216,28 @@ TextState BottomInfo::textState(
 	).contains(position);
 	if (inTime) {
 		result.cursor = CursorState::Date;
-		if (_data.editsCount > 0) {
-			// Liquid glass fork: "edited ×N" opens the edit history.
-			const auto id = item->fullId();
-			const auto session = &item->history()->session();
-			result.link = std::make_shared<LambdaClickHandler>([=](
-					ClickContext context) {
-				const auto my = context.other.value<ClickHandlerContext>();
-				const auto controller = my.sessionWindow.get();
-				const auto strong = session->data().message(id);
-				if (controller && strong) {
-					::Data::SavedDeleted::ShowEditsBox(controller, strong);
-				}
-			});
+		if ((_data.flags & Data::Flag::Edited) || _data.editsCount > 0) {
+			// Liquid glass fork: "edited" opens the edit history. The link
+			// is kept, a new one on every hover breaks press == release.
+			if (!_editsLink) {
+				const auto id = item->fullId();
+				const auto session = &item->history()->session();
+				_editsLink = std::make_shared<LambdaClickHandler>([=](
+						ClickContext context) {
+					const auto my = context.other.value<ClickHandlerContext>();
+					const auto controller = my.sessionWindow.get();
+					const auto strong = session->data().message(id);
+					if (!controller || !strong) {
+						return;
+					} else if (::Data::SavedDeleted::EditsCount(strong) > 0) {
+						::Data::SavedDeleted::ShowEditsBox(controller, strong);
+					} else {
+						controller->showToast(u"Прошлых версий нет: сообщение "
+							"изменили до того, как aglergram его увидел"_q);
+					}
+				});
+			}
+			result.link = _editsLink;
 		}
 	}
 	return result;

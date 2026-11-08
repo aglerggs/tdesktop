@@ -137,6 +137,7 @@ private:
 	Ui::Text::String _replies;
 	std::unique_ptr<Effect> _effect;
 	mutable ClickHandlerPtr _replayLink;
+	mutable ClickHandlerPtr _editsLink; // aglergram: "edited" opens versions.
 	int _effectMaxWidth = 0;
 	bool _authorElided = false;
 

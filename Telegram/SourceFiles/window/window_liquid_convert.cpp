@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "mainwindow.h"
 #include "window/window_session_controller.h"
+#include "window/window_liquid_text_modes.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
@@ -262,6 +263,7 @@ private:
 	struct Pill {
 		QString text;
 		QRect rect;
+		bool mode = false;
 	};
 	void refresh();
 	void layout(int width);
@@ -291,6 +293,9 @@ QuickStrip::QuickStrip(QWidget *parent, Fn<void(QString)> send)
 	}) | rpl::on_next([=] {
 		refresh();
 	}, lifetime());
+	TextModeValue() | rpl::skip(1) | rpl::on_next([=] {
+		refresh();
+	}, lifetime());
 }
 
 void QuickStrip::refresh() {
@@ -301,7 +306,9 @@ void QuickStrip::refresh() {
 
 int QuickStrip::resizeGetHeight(int newWidth) {
 	layout(newWidth);
-	return _phrases.isEmpty() ? 0 : style::ConvertScale(kStripHeight);
+	return (_phrases.isEmpty() && CurrentTextMode() == TextMode::None)
+		? 0
+		: style::ConvertScale(kStripHeight);
 }
 
 void QuickStrip::layout(int width) {
@@ -312,6 +319,12 @@ void QuickStrip::layout(int width) {
 	const auto skip = style::ConvertScale(kPillSkip);
 	const auto top = (style::ConvertScale(kStripHeight) - height) / 2;
 	auto left = skip * 2;
+	if (const auto mode = CurrentTextMode(); mode != TextMode::None) {
+		const auto text = TextModeTitle(mode) + u"  ✕"_q;
+		const auto pill = font->width(text) + padding * 2;
+		_pills.push_back({ text, QRect(left, top, pill, height), true });
+		left += pill + skip;
+	}
 	for (const auto &phrase : _phrases) {
 		auto text = phrase;
 		const auto maxText = style::ConvertScale(180);
@@ -344,13 +357,13 @@ void QuickStrip::paintEvent(QPaintEvent *e) {
 	const auto padding = style::ConvertScale(kPillPadding);
 	for (auto i = 0; i != int(_pills.size()); ++i) {
 		const auto &pill = _pills[i];
-		auto fill = st::windowBgOver->c;
+		auto fill = pill.mode ? st::activeButtonBg->c : st::windowBgOver->c;
 		fill.setAlphaF((i == _over) ? 0.95 : 0.7);
 		p.setPen(Qt::NoPen);
 		p.setBrush(fill);
 		const auto radius = pill.rect.height() / 2.;
 		p.drawRoundedRect(pill.rect, radius, radius);
-		p.setPen(st::windowFg);
+		p.setPen(pill.mode ? st::activeButtonFg : st::windowFg);
 		const auto text = font->elided(
 			pill.text,
 			pill.rect.width() - padding * 2);
@@ -377,8 +390,12 @@ void QuickStrip::mousePressEvent(QMouseEvent *e) {
 
 void QuickStrip::mouseReleaseEvent(QMouseEvent *e) {
 	const auto pressed = std::exchange(_pressed, -1);
-	if (pressed >= 0 && pressed == pillAt(e->pos()) && _send) {
-		_send(_pills[pressed].text);
+	if (pressed >= 0 && pressed == pillAt(e->pos())) {
+		if (_pills[pressed].mode) {
+			SetTextMode(TextMode::None);
+		} else if (_send) {
+			_send(_pills[pressed].text);
+		}
 	}
 }
 
