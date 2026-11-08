@@ -49,6 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtNetwork/QNetworkAccessManager>
+#include <QtNetwork/QNetworkProxy>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 
@@ -172,6 +173,41 @@ QNetworkAccessManager &Network() {
 	return result;
 }
 
+// GitHub is reached directly first: the Telegram proxy set in the app
+// (SOCKS of tg-ws-proxy, for one) often carries only Telegram traffic.
+QNetworkAccessManager &DirectNetwork() {
+	static auto result = [] {
+		auto manager = std::make_unique<QNetworkAccessManager>();
+		manager->setProxy(QNetworkProxy::NoProxy);
+		return manager;
+	}();
+	return *result;
+}
+
+// Direct, then through the app proxy if the direct way failed.
+void Fetch(
+		QNetworkRequest request,
+		Fn<void(QNetworkReply*)> done,
+		bool direct = true) {
+	request.setRawHeader("User-Agent", "aglergram");
+	const auto reply = (direct ? DirectNetwork() : Network()).get(request);
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		const auto status = reply->attribute(
+			QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		const auto failed = (reply->error() != QNetworkReply::NoError)
+			&& (status == 0);
+		if (failed && direct) {
+			LOG(("aglergram: direct request failed (%1), via proxy: %2"
+				).arg(reply->errorString()
+				).arg(request.url().toString()));
+			Fetch(request, done, false);
+			return;
+		}
+		done(reply);
+	});
+}
+
 [[nodiscard]] QString ExePath() {
 	return QCoreApplication::applicationFilePath();
 }
@@ -215,15 +251,16 @@ void DownloadUpdate(
 	request.setAttribute(
 		QNetworkRequest::RedirectPolicyAttribute,
 		QNetworkRequest::NoLessSafeRedirectPolicy);
-	const auto reply = Network().get(request);
 	const auto weak = base::make_weak(controller);
-	QObject::connect(reply, &QNetworkReply::finished, [=] {
-		reply->deleteLater();
+	Fetch(request, [=](QNetworkReply *reply) {
 		const auto strong = weak.get();
 		if (!strong) {
 			return;
 		} else if (reply->error() != QNetworkReply::NoError) {
-			strong->showToast(u"Не удалось скачать обновление"_q);
+			LOG(("aglergram: update download failed: %1"
+				).arg(reply->errorString()));
+			strong->showToast(u"Не удалось скачать обновление: "_q
+				+ reply->errorString());
 			return;
 		}
 		const auto bytes = reply->readAll();
@@ -634,6 +671,69 @@ void ShowPatchHistory(not_null<SessionController*> controller) {
 	ShowPatchesBox(controller, u"История обновлений"_q, std::move(list));
 }
 
+namespace {
+
+void ShowFoundUpdate(
+		not_null<SessionController*> controller,
+		bool manual,
+		const QString &tag,
+		const QString &notes,
+		const QString &url) {
+	if (tag.isEmpty() || url.isEmpty() || !Newer(tag, CurrentVersion())) {
+		if (manual) {
+			controller->showToast(u"У тебя последняя версия "_q + CurrentVersion());
+		}
+		return;
+	}
+	ShowUpdateBox(
+		controller,
+		tag.mid(int(strlen(kTagPrefix))),
+		notes,
+		url);
+}
+
+// Without the API (it has a limit of requests per hour): the page of the
+// latest release redirects to its tag, the file name is always the same.
+void CheckByReleasePage(
+		not_null<SessionController*> controller,
+		bool manual,
+		const QString &repository) {
+	auto request = QNetworkRequest(QUrl(
+		u"https://github.com/"_q + repository + u"/releases/latest"_q));
+	request.setAttribute(
+		QNetworkRequest::RedirectPolicyAttribute,
+		QNetworkRequest::ManualRedirectPolicy);
+	const auto weak = base::make_weak(controller);
+	Fetch(request, [=](QNetworkReply *reply) {
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
+		const auto location = reply->attribute(
+			QNetworkRequest::RedirectionTargetAttribute).toUrl().toString();
+		const auto marker = u"/releases/tag/"_q;
+		const auto index = location.indexOf(marker);
+		if (index < 0) {
+			LOG(("aglergram: update check failed: %1"
+				).arg(reply->errorString()));
+			if (manual) {
+				strong->showToast(u"Не удалось проверить обновления: "_q
+					+ reply->errorString());
+			}
+			return;
+		}
+		const auto tag = location.mid(index + marker.size()).section('/', 0, 0);
+		const auto url = u"https://github.com/"_q
+			+ repository
+			+ u"/releases/download/"_q
+			+ tag
+			+ u"/aglergram.exe"_q;
+		ShowFoundUpdate(strong, manual, tag, QString(), url);
+	});
+}
+
+} // namespace
+
 void CheckForUpdates(not_null<SessionController*> controller, bool manual) {
 	const auto repository = LoadedPatches().repository;
 	if (repository.isEmpty()) {
@@ -642,11 +742,8 @@ void CheckForUpdates(not_null<SessionController*> controller, bool manual) {
 	auto request = QNetworkRequest(QUrl(
 		u"https://api.github.com/repos/"_q + repository + u"/releases/latest"_q));
 	request.setRawHeader("Accept", "application/vnd.github+json");
-	request.setRawHeader("User-Agent", "aglergram");
-	const auto reply = Network().get(request);
 	const auto weak = base::make_weak(controller);
-	QObject::connect(reply, &QNetworkReply::finished, [=] {
-		reply->deleteLater();
+	Fetch(request, [=](QNetworkReply *reply) {
 		const auto strong = weak.get();
 		if (!strong) {
 			return;
@@ -660,17 +757,17 @@ void CheckForUpdates(not_null<SessionController*> controller, bool manual) {
 				url = asset.value(u"browser_download_url"_q).toString();
 			}
 		}
-		if (tag.isEmpty() || url.isEmpty() || !Newer(tag, CurrentVersion())) {
-			if (manual) {
-				strong->showToast(reply->error() == QNetworkReply::NoError
-					? (u"У тебя последняя версия "_q + CurrentVersion())
-					: u"Не удалось проверить обновления"_q);
-			}
+		if (reply->error() != QNetworkReply::NoError || tag.isEmpty()) {
+			// Rate limit or the API is unreachable: the releases page.
+			LOG(("aglergram: releases API failed (%1), trying the page"
+				).arg(reply->errorString()));
+			CheckByReleasePage(strong, manual, repository);
 			return;
 		}
-		ShowUpdateBox(
+		ShowFoundUpdate(
 			strong,
-			tag.mid(int(strlen(kTagPrefix))),
+			manual,
+			tag,
 			object.value(u"body"_q).toString(),
 			url);
 	});
@@ -920,10 +1017,7 @@ void RefreshTwitch() {
 		server = u"https://"_q + server;
 	}
 	auto request = QNetworkRequest(QUrl(server + u"/live"_q));
-	request.setRawHeader("User-Agent", "aglergram");
-	const auto reply = Network().get(request);
-	QObject::connect(reply, &QNetworkReply::finished, [=] {
-		reply->deleteLater();
+	Fetch(request, [=](QNetworkReply *reply) {
 		if (reply->error() != QNetworkReply::NoError) {
 			return;
 		}
