@@ -2556,6 +2556,8 @@ PRIVATE
     window/window_liquid_features.h
     window/window_liquid_text_modes.cpp
     window/window_liquid_text_modes.h
+    window/window_liquid_trail.cpp
+    window/window_liquid_trail.h
     window/window_liquid_updates.cpp
     window/window_liquid_whisper.cpp
     window/window_liquid_whisper.h

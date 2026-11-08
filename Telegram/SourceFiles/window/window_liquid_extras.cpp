@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_liquid_features.h"
 #include "window/window_liquid_updates.h"
 #include "window/window_liquid_convert.h"
+#include "window/window_liquid_trail.h"
 #include "window/window_liquid_text_modes.h"
 
 #include "apiwrap.h"
@@ -347,6 +348,9 @@ struct Command {
 	add(u"🎞 Видео в GIF"_q, u"gif гиф видео"_q, [=] {
 		ConvertFromFile(controller, ConvertKind::Gif);
 	});
+	add(u"🖱 След за курсором"_q, u"cursor курсор след мышь trail"_q, [=] {
+		ShowCursorTrailBox(controller);
+	});
 	add(u"✨ Свои команды"_q, u"commands команды точка kawaii"_q, [=] {
 		ShowTextCommandsBox(controller);
 	});
@@ -486,6 +490,7 @@ void StartExtras(not_null<SessionController*> controller) {
 		}
 	});
 	StartDaySummary(controller);
+	StartCursorTrail(controller);
 
 	static auto started = false;
 	if (started) {

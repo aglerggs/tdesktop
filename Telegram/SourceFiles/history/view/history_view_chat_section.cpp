@@ -4717,9 +4717,17 @@ void ChatWidget::updateControlsGeometry() {
 	_composeControls->move(
 		_glassBottom ? st::historyGlassComposeSide : 0,
 		composeTop);
-	_composeControls->setAutocompleteBoundingRect(_scroll->geometry());
+	// With the glass the list goes under the compose bar, so the panels
+	// above the field (emoji stickers, mentions) end where it starts.
+	auto autocompleteRect = _scroll->geometry();
+	if (_glassBottom) {
+		autocompleteRect.setBottom(std::min(
+			autocompleteRect.bottom(),
+			composeTop - st::historyGlassComposeSide - 1));
+	}
+	_composeControls->setAutocompleteBoundingRect(autocompleteRect);
 	if (_supportAutocomplete) {
-		_supportAutocomplete->setBoundings(_scroll->geometry());
+		_supportAutocomplete->setBoundings(autocompleteRect);
 	}
 	_composeControlsTop = composeTop;
 
