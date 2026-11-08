@@ -27,6 +27,7 @@ public:
 	enum class Mode {
 		Silent,
 		Inspecting, // Not playing video, but reading data.
+		SilentLarge, // aglergram live wallpapers: frames up to 4K.
 	};
 
 	enum class ReadResult {

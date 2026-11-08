@@ -361,9 +361,13 @@ void ApplyWallpaper(const QString &path, bool retry = false) {
 				state.frames.fire({});
 			} else if (reader->ready() && !reader->started()) {
 				const auto original = QSize(reader->width(), reader->height());
-				const auto size = original.scaled(
-					QSize(1280, 1280),
-					Qt::KeepAspectRatio);
+				// Never upscale here: a second smooth scale on paint made
+				// small videos blurry. Only big ones are reduced.
+				const auto limit = QSize(1920, 1920);
+				const auto size = (original.width() > limit.width()
+					|| original.height() > limit.height())
+					? original.scaled(limit, Qt::KeepAspectRatio)
+					: original;
 				state.request.frame = size;
 				state.request.outer = size;
 				state.request.factor = 1;
@@ -377,7 +381,10 @@ void ApplyWallpaper(const QString &path, bool retry = false) {
 	// Read into memory: no file kept locked, any path characters work.
 	auto file = QFile(path);
 	if (file.open(QIODevice::ReadOnly)) {
-		state.reader = ::Media::Clip::MakeReader(file.readAll(), callback);
+		state.reader = ::Media::Clip::MakeReader(
+			file.readAll(),
+			callback,
+			::Media::Clip::Reader::LargeFrames());
 	} else {
 		LOG(("aglergram: live wallpaper not found: %1").arg(path));
 	}
@@ -759,7 +766,8 @@ void ShowLiveWallpaperBox(not_null<SessionController*> controller) {
 		const auto current = Data::LiquidStore::LiveWallpaper();
 		const auto choose = [=](const QString &path) {
 			Data::LiquidStore::SetLiveWallpaper(path);
-			ApplyWallpaper(path);
+			// A choice by hand always starts the wallpaper anew.
+			ApplyWallpaper(path, true);
 			box->closeBox();
 		};
 		const auto mark = [=](const QString &path, const QString &text) {
@@ -826,7 +834,7 @@ void ShowLiveWallpaperBox(not_null<SessionController*> controller) {
 					}
 					const auto path = AddRecentWallpaper(result.paths.front());
 					Data::LiquidStore::SetLiveWallpaper(path);
-					ApplyWallpaper(path);
+					ApplyWallpaper(path, true);
 				});
 			box->closeBox();
 		});

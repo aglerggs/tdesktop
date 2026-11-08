@@ -21,7 +21,8 @@ constexpr auto kMaxInlineArea = 1280 * 720;
 constexpr auto kMaxSendingArea = 3840 * 2160; // usual 4K
 
 [[nodiscard]] auto MaxAreaForMode(ReaderImplementation::Mode mode) {
-	return (mode == ReaderImplementation::Mode::Inspecting)
+	return (mode == ReaderImplementation::Mode::Inspecting
+			|| mode == ReaderImplementation::Mode::SilentLarge)
 		? kMaxSendingArea
 		: kMaxInlineArea;
 }

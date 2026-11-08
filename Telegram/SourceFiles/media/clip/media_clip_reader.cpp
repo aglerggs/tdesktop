@@ -220,6 +220,12 @@ Reader::Reader(const QByteArray &data, Callback &&callback)
 	init(Core::FileLocation(QString()), data);
 }
 
+Reader::Reader(const QByteArray &data, Callback &&callback, LargeFrames)
+: _callback(std::move(callback))
+, _largeFrames(true) {
+	init(Core::FileLocation(QString()), data);
+}
+
 void Reader::init(const Core::FileLocation &location, const QByteArray &data) {
 	if (Workers.size() < kClipThreadsCount) {
 		_threadIndex = Workers.size();
@@ -472,9 +478,14 @@ Reader::~Reader() {
 
 class ReaderPrivate {
 public:
-	ReaderPrivate(Reader *reader, const Core::FileLocation &location, const QByteArray &data)
+	ReaderPrivate(
+		Reader *reader,
+		const Core::FileLocation &location,
+		const QByteArray &data,
+		bool largeFrames = false)
 	: _interface(reader)
-	, _data(data) {
+	, _data(data)
+	, _largeFrames(largeFrames) {
 		if (_data.isEmpty()) {
 			_location = std::make_unique<Core::FileLocation>(location);
 			if (!_location->accessEnable()) {
@@ -497,7 +508,11 @@ public:
 
 				auto firstFramePositionMs = crl::time(0);
 				auto reader = std::make_unique<internal::FFMpegReaderImplementation>(_location.get(), &_data);
-				if (reader->start(internal::ReaderImplementation::Mode::Silent, firstFramePositionMs)) {
+				if (reader->start(
+						(_largeFrames
+							? internal::ReaderImplementation::Mode::SilentLarge
+							: internal::ReaderImplementation::Mode::Silent),
+						firstFramePositionMs)) {
 					auto firstFrameReadResult = reader->readFramesTill(-1, ms);
 					if (firstFrameReadResult == internal::ReaderImplementation::ReadResult::Success) {
 						if (reader->renderFrame(frame()->original, frame()->alpha, frame()->index, QSize())) {
@@ -607,7 +622,11 @@ public:
 
 		_implementation = std::make_unique<internal::FFMpegReaderImplementation>(_location.get(), &_data);
 
-		return _implementation->start(internal::ReaderImplementation::Mode::Silent, _seekPositionMs);
+		return _implementation->start(
+			(_largeFrames
+				? internal::ReaderImplementation::Mode::SilentLarge
+				: internal::ReaderImplementation::Mode::Silent),
+			_seekPositionMs);
 	}
 
 	void startedAt(crl::time ms) {
@@ -660,6 +679,7 @@ private:
 	QByteArray _data;
 	std::unique_ptr<Core::FileLocation> _location;
 	bool _accessed = false;
+	bool _largeFrames = false;
 
 	QBuffer _buffer;
 	std::unique_ptr<internal::ReaderImplementation> _implementation;
@@ -711,7 +731,11 @@ Manager::Manager(not_null<QThread*> thread) {
 }
 
 void Manager::append(Reader *reader, const Core::FileLocation &location, const QByteArray &data) {
-	reader->_private = new ReaderPrivate(reader, location, data);
+	reader->_private = new ReaderPrivate(
+		reader,
+		location,
+		data,
+		reader->_largeFrames);
 	_loadLevel.fetchAndAddRelaxed(kAverageGifSize);
 	update(reader);
 }

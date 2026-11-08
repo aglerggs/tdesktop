@@ -72,6 +72,11 @@ public:
 	Reader(const QString &filepath, Callback &&callback);
 	Reader(const QByteArray &data, Callback &&callback);
 
+	// aglergram: live wallpapers, frames bigger than 720p are allowed.
+	struct LargeFrames {
+	};
+	Reader(const QByteArray &data, Callback &&callback, LargeFrames);
+
 	// Reader can be already deleted.
 	static void SafeCallback(
 		Reader *reader,
@@ -137,6 +142,7 @@ private:
 
 	Callback _callback;
 	State _state = State::Reading;
+	bool _largeFrames = false;
 
 	crl::time _durationMs = 0;
 
