@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ffmpeg/ffmpeg_utility.h"
 #include "media/audio/media_audio_capture.h"
 #include "ui/controls/round_video_recorder_data.h"
+#include "ui/effects/liquid_round_frame.h"
 #include "ui/image/image_prepare.h"
 #include "ui/arc_angles.h"
 #include "ui/dynamic_image.h"
@@ -762,12 +763,22 @@ void RoundVideoRecorder::Private::encodeVideoFrame(
 		return;
 	}
 
-	const auto cdata = frame.constBits()
-		+ (frame.bytesPerLine() * fy)
-		+ (fx * frame.depth() / 8);
+	// aglergram: the glowing ring is drawn into the encoded frames.
+	const auto ring = Ui::LiquidRound::Current();
+	auto painted = QImage();
+	if (ring != Ui::LiquidRound::Frame::None) {
+		painted = frame.copy(crop);
+		Ui::LiquidRound::Paint(painted, ring, mcstimestamp / 1000);
+	}
+	const auto &source = painted.isNull() ? frame : painted;
+	const auto sx = painted.isNull() ? fx : 0;
+	const auto sy = painted.isNull() ? fy : 0;
+	const auto cdata = source.constBits()
+		+ (source.bytesPerLine() * sy)
+		+ (sx * source.depth() / 8);
 
 	const uint8_t *srcSlice[1] = { cdata };
-	int srcStride[1] = { int(frame.bytesPerLine()) };
+	int srcStride[1] = { int(source.bytesPerLine()) };
 
 	sws_scale(
 		_swsContext.get(),
@@ -1243,6 +1254,10 @@ void RoundVideoRecorder::prepareFrame(bool blurred) {
 			QSize(_side, _side) * ratio,
 			Qt::KeepAspectRatio,
 			Qt::SmoothTransformation).mirrored(true, false);
+		Ui::LiquidRound::Paint(
+			scaled,
+			Ui::LiquidRound::Current(),
+			crl::now());
 		_framePrepared = Images::Circle(std::move(scaled));
 		_framePrepared.setDevicePixelRatio(ratio);
 	}

@@ -1576,6 +1576,8 @@ PRIVATE
     media/audio/media_audio_edit.h
     media/audio/media_audio_capture.cpp
     media/audio/media_audio_capture.h
+    media/audio/media_audio_voice_fx.cpp
+    media/audio/media_audio_voice_fx.h
     media/audio/media_audio_capture_common.h
     media/audio/media_audio_ffmpeg_loader.cpp
     media/audio/media_audio_ffmpeg_loader.h
@@ -2556,6 +2558,12 @@ PRIVATE
     window/window_liquid_features.h
     window/window_liquid_text_modes.cpp
     window/window_liquid_text_modes.h
+    window/window_liquid_music.cpp
+    window/window_liquid_music.h
+    window/window_liquid_plugins.cpp
+    window/window_liquid_plugins.h
+    window/window_liquid_streaks.cpp
+    window/window_liquid_streaks.h
     window/window_liquid_trail.cpp
     window/window_liquid_trail.h
     window/window_liquid_updates.cpp

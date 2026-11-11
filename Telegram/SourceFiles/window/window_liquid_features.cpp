@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_liquid_extras.h"
 #include "window/window_liquid_whisper.h"
 #include "window/window_liquid_convert.h"
+#include "window/window_liquid_plugins.h"
 
 #include "api/api_common.h"
 #include "apiwrap.h"
@@ -881,7 +882,14 @@ void FillMessageMenu(
 	}
 	const auto session = &item->history()->session();
 	const auto itemId = item->fullId();
-	if (CanConvertMessage(item)) {
+	if (CanForwardFromOtherAccount(controller, item)) {
+		menu->addAction(u"↪️ Отправить с другого аккаунта"_q, [=] {
+			if (const auto strong = session->data().message(itemId)) {
+				ForwardFromOtherAccount(controller, strong);
+			}
+		}, &st::menuIconForward);
+	}
+	if (PluginEnabled(u"convert"_q) && CanConvertMessage(item)) {
 		menu->addAction(u"⭕ Отправить кружком"_q, [=] {
 			if (const auto strong = session->data().message(itemId)) {
 				ConvertMessage(controller, strong, ConvertKind::Round);
@@ -893,14 +901,14 @@ void FillMessageMenu(
 			}
 		}, &st::menuIconGif);
 	}
-	if (CanTranscribeLocally(item)) {
+	if (PluginEnabled(u"whisper"_q) && CanTranscribeLocally(item)) {
 		menu->addAction(u"🎙 В текст (Whisper)"_q, [=] {
 			if (const auto strong = session->data().message(itemId)) {
 				TranscribeLocally(controller, strong);
 			}
 		}, &st::menuIconTranslate);
 	}
-	menu->addAction(
+	if (PluginEnabled(u"bookmarks"_q)) menu->addAction(
 		IsBookmarked(item) ? u"Убрать из закладок"_q : u"В закладки ⭐"_q,
 		[=] {
 			if (const auto strong = session->data().message(itemId)) {

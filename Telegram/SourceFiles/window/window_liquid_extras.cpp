@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_liquid_updates.h"
 #include "window/window_liquid_convert.h"
 #include "window/window_liquid_trail.h"
+#include "window/window_liquid_plugins.h"
+#include "window/window_liquid_music.h"
 #include "window/window_liquid_text_modes.h"
 
 #include "apiwrap.h"
@@ -347,6 +349,18 @@ struct Command {
 	});
 	add(u"🎞 Видео в GIF"_q, u"gif гиф видео"_q, [=] {
 		ConvertFromFile(controller, ConvertKind::Gif);
+	});
+	add(u"⭕ Рамка на кружках"_q, u"round кружок рамка неон ring"_q, [=] {
+		ShowRoundFrameBox(controller);
+	});
+	add(u"🎙 Эффект голоса"_q, u"voice голос эффект робот бурундук"_q, [=] {
+		ShowVoiceFxBox(controller);
+	});
+	add(u"🎵 Слушаю сейчас"_q, u"music spotify музыка слушаю"_q, [=] {
+		ShowMusicBox(controller);
+	});
+	add(u"🧩 Плагины"_q, u"plugins плагины chatsaver forward"_q, [=] {
+		ShowPluginsBox(controller);
 	});
 	add(u"🖱 След за курсором"_q, u"cursor курсор след мышь trail"_q, [=] {
 		ShowCursorTrailBox(controller);

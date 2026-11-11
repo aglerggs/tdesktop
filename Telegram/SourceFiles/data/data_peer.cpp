@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_sensitive_content.h"
 #include "data/data_user.h"
+#include "data/data_liquid_store.h"
 #include "data/data_chat.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_channel.h"
@@ -305,10 +306,30 @@ Main::Account &PeerData::account() const {
 	return session().account();
 }
 
+void PeerData::refreshLocalName() {
+	auto real = Data::LiquidStore::RealName(&session(), id);
+	if (real.isEmpty()) {
+		real = name();
+	}
+	const auto username = isUser()
+		? asUser()->editableUsername()
+		: isChannel()
+		? asChannel()->editableUsername()
+		: QString();
+	updateNameDelayed(real, real, username);
+}
+
 void PeerData::updateNameDelayed(
-		const QString &newName,
-		const QString &newNameOrPhone,
+		const QString &realName,
+		const QString &realNameOrPhone,
 		const QString &newUsername) {
+	// aglergram: a local name, seen only on this computer.
+	Data::LiquidStore::RememberRealName(&session(), id, realName);
+	const auto local = isSelf()
+		? QString()
+		: Data::LiquidStore::LocalName(&session(), id);
+	const auto &newName = local.isEmpty() ? realName : local;
+	const auto &newNameOrPhone = local.isEmpty() ? realNameOrPhone : local;
 	if (_name == newName && _nameVersion > 1) {
 		if (isUser()) {
 			if (asUser()->nameOrPhone == newNameOrPhone

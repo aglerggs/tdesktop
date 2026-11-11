@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio_capture_common.h"
 #include "media/audio/media_audio_ffmpeg_loader.h"
 #include "media/audio/media_audio_track.h"
+#include "media/audio/media_audio_voice_fx.h"
 #include "ffmpeg/ffmpeg_utility.h"
 #include "base/timer.h"
 
@@ -241,6 +242,9 @@ struct Instance::Inner::Private {
 	uint16 waveformPeak = 0;
 	QVector<uchar> waveform;
 
+	// aglergram: the voice effect, chosen when the recording starts.
+	std::unique_ptr<VoiceFx> fx;
+
 	static int ReadData(void *opaque, uint8_t *buf, int buf_size) {
 		auto l = reinterpret_cast<Private*>(opaque);
 
@@ -314,6 +318,9 @@ void Instance::Inner::start(
 		Fn<void()> error,
 		Fn<void(Chunk)> externalProcessing) {
 	_externalProcessing = std::move(externalProcessing);
+	d->fx = _externalProcessing
+		? nullptr
+		: MakeVoiceFx(CurrentVoiceEffect(), kCaptureFrequency);
 	_updated = std::move(updated);
 	_error = std::move(error);
 	if (_paused) {
@@ -712,6 +719,11 @@ bool Instance::Inner::processFrame(int32 offset, int32 framesize) {
 		return false;
 	}
 	auto samplesCnt = static_cast<int>(framesize / sizeof(short));
+	if (d->fx) {
+		d->fx->process(
+			reinterpret_cast<int16*>(_captured.data() + offset),
+			samplesCnt);
+	}
 
 	int res = 0;
 	char err[AV_ERROR_MAX_STRING_SIZE] = { 0 };

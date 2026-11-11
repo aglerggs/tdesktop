@@ -378,6 +378,8 @@ public:
 
 	[[nodiscard]] int nameVersion() const;
 	[[nodiscard]] const QString &name() const;
+	// aglergram: re-apply the local name after it was set or removed.
+	void refreshLocalName();
 	[[nodiscard]] const QString &shortName() const;
 	[[nodiscard]] const QString &topBarNameText() const;
 

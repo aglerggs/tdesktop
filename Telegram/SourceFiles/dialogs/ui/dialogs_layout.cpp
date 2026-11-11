@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/ui/dialogs_layout.h"
 
 #include "window/window_liquid_updates.h"
+#include "window/window_liquid_streaks.h"
+#include "ui/emoji_config.h"
 
 #include "base/options.h"
 #include "base/unixtime.h"
@@ -1018,6 +1020,25 @@ void PaintRow(
 					- muteIcon.width()
 					- st::dialogsMuteIconSkip);
 		}
+		// aglergram: a TikTok-like streak flame after the name.
+		const auto streak = (history && !context.search)
+			? Window::Liquid::StreakFor(from)
+			: Window::Liquid::Streak();
+		const auto streakText = streak
+			? QString::number(streak.count)
+			: QString();
+		const auto streakEmoji = streak
+			? Ui::Emoji::Find(streak.atRisk ? u"⌛"_q : u"🔥"_q)
+			: nullptr;
+		const auto streakEmojiSize = Ui::Emoji::GetSizeNormal()
+			/ style::DevicePixelRatio();
+		const auto streakWidth = streakEmoji
+			? (st::dialogsMuteIconSkip
+				+ streakEmojiSize
+				+ 1
+				+ st::semiboldFont->width(streakText))
+			: 0;
+		rectForName.setWidth(rectForName.width() - streakWidth);
 		auto badgeWidth = 0;
 		if ((history || sublist) && !context.search) {
 			const auto widthBefore = rectForName.width();
@@ -1034,6 +1055,33 @@ void PaintRow(
 			.availableWidth = rectForName.width(),
 			.elisionLines = 1,
 		});
+		if (streakEmoji) {
+			const auto nameW = std::min(
+				rowName.maxWidth(),
+				rectForName.width());
+			const auto left = rectForName.left()
+				+ nameW
+				+ badgeWidth
+				+ st::dialogsMuteIconSkip;
+			const auto top = rectForName.top()
+				+ (st::semiboldFont->height - streakEmojiSize) / 2;
+			Ui::Emoji::Draw(
+				p,
+				streakEmoji,
+				Ui::Emoji::GetSizeNormal(),
+				left,
+				top);
+			p.setPen(context.active
+				? st::dialogsNameFgActive->c
+				: streak.atRisk
+				? st::windowSubTextFg->c
+				: QColor(0xFF, 0x7A, 0x1A));
+			p.drawTextLeft(
+				left + streakEmojiSize + 1,
+				rectForName.top(),
+				context.width,
+				streakText);
+		}
 		if (drawMuteIcon) {
 			const auto &muteIcon = ThreeStateIcon(
 				st::dialogsMuteIcon,
@@ -1045,6 +1093,7 @@ void PaintRow(
 			const auto muteLeft = rectForName.left()
 				+ nameW
 				+ badgeWidth
+				+ streakWidth
 				+ st::dialogsMuteIconSkip;
 			const auto muteTop = rectForName.top()
 				+ (st::semiboldFont->height - muteIcon.height()) / 2;

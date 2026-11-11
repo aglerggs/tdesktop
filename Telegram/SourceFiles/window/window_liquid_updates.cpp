@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_liquid_updates.h"
+#include "window/window_liquid_plugins.h"
 
 #include "window/window_liquid_aura.h"
 
@@ -1009,6 +1010,9 @@ constexpr auto kTwitchSite = "https://blinistiy.fun";
 }
 
 void RefreshTwitch() {
+	if (!PluginEnabled(u"twitch"_q)) {
+		return;
+	}
 	auto server = TwitchServer();
 	while (server.endsWith('/')) {
 		server.chop(1);

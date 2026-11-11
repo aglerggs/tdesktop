@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_inner_widget.h"
 
 #include "window/window_liquid_updates.h"
+#include "window/window_liquid_streaks.h"
 
 #include "dialogs/dialogs_three_state_icon.h"
 #include "dialogs/ui/chat_search_empty.h"
@@ -326,6 +327,10 @@ InnerWidget::InnerWidget(
 
 	// aglergram: repaint LIVE rings when Twitch statuses change.
 	Window::Liquid::TwitchUpdates(
+	) | rpl::on_next([=] {
+		update();
+	}, lifetime());
+	Window::Liquid::StreakUpdates(
 	) | rpl::on_next([=] {
 		update();
 	}, lifetime());

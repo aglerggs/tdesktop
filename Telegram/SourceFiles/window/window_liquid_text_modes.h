@@ -29,6 +29,14 @@ enum class TextMode {
 	Zalgo,
 	Reverse,
 	Translit,
+	Script,
+	Bold,
+	Double,
+	SmallCaps,
+	Bubble,
+	Wide,
+	Upside,
+	Strike,
 };
 
 [[nodiscard]] TextMode CurrentTextMode();

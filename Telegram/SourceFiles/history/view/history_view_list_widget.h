@@ -1030,6 +1030,22 @@ private:
 	Ui::Animations::Basic _glassAppearTicker;
 	void glassAppearStart(not_null<Element*> view, bool flight);
 	void glassAppearStep();
+
+	// aglergram: an edited message morphs from the old text to the new one.
+	struct EditMorph {
+		QImage old;
+		QRect inner;
+		crl::time start = 0;
+	};
+	base::flat_map<FullMsgId, EditMorph> _editMorph;
+	Ui::Animations::Basic _editMorphTicker;
+	void editMorphSnapshot(not_null<HistoryItem*> item);
+	void editMorphStart(not_null<HistoryItem*> item, bool changed);
+	void editMorphStep();
+	[[nodiscard]] bool editMorphPaint(
+		Painter &p,
+		not_null<Element*> view,
+		const Fn<void()> &draw);
 	[[nodiscard]] bool glassAppearPaint(
 		Painter &p,
 		not_null<Element*> view,

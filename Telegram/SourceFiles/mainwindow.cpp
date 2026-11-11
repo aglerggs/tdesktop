@@ -11,6 +11,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_liquid_intro.h"
 #include "window/window_liquid_features.h"
 #include "window/window_liquid_extras.h"
+#include "window/window_liquid_streaks.h"
+#include "window/window_liquid_music.h"
+#include "window/window_liquid_plugins.h"
 
 #include "data/data_document.h"
 #include "data/data_session.h"
@@ -367,6 +370,9 @@ void MainWindow::setupMain(
 	}
 	Window::Liquid::Start(sessionController());
 	Window::Liquid::StartExtras(sessionController());
+	Window::Liquid::StartStreaks(sessionController());
+	Window::Liquid::StartMusic(sessionController());
+	Window::Liquid::StartPlugins();
 	// Liquid glass fork: the startup splash, once per launch.
 	static auto introShown = false;
 	if (!introShown

@@ -68,6 +68,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_liquid_extras.h"
 #include "window/window_liquid_convert.h"
 #include "window/window_liquid_trail.h"
+#include "window/window_liquid_plugins.h"
 #include "window/window_liquid_text_modes.h"
 #include "storage/storage_domain.h"
 #include "main/main_domain.h"
@@ -919,6 +920,9 @@ void SetupLiquidGlass(
 			st::settingsButtonNoIcon));
 		button->setClickedCallback(std::move(callback));
 	};
+	addLiquidButton(u"🧩 Плагины"_q, [=] {
+		Window::Liquid::ShowPluginsBox(controller);
+	});
 	addLiquidButton(u"Командная палитра (Ctrl+Shift+K)"_q, [=] {
 		Window::Liquid::ShowCommandPalette(controller);
 	});

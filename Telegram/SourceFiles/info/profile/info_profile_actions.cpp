@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_actions.h"
 
 #include "data/data_liquid_store.h"
+#include "window/window_liquid_music.h"
 #include "window/window_liquid_updates.h"
 
 #include "api/api_blocked_peers.h"
@@ -1698,6 +1699,29 @@ Section DetailsFiller::makeInfo() {
 					+ (stream->game.isEmpty() ? QString() : (stream->game + u" · "_q))
 					+ QString::number(stream->viewers)
 					+ u" зрителей"_q);
+				return result;
+			}));
+	}
+	if (_peer->isUser()) {
+		// aglergram: what this person listens to now, from aglergram.
+		const auto peerId = _peer->id;
+		addInfoLine(
+			rpl::single(u"Слушает"_q),
+			rpl::single(rpl::empty) | rpl::then(
+				Window::Liquid::NowPlayingUpdates()
+			) | rpl::map([=] {
+				const auto track = Window::Liquid::NowPlayingFor(peerId);
+				if (!track) {
+					return TextWithEntities();
+				}
+				const auto full = track->artist.isEmpty()
+					? track->title
+					: (track->artist + u" — "_q + track->title);
+				auto result = TextWithEntities{ u"🎵 "_q };
+				result.append(Ui::Text::Link(
+					full,
+					u"https://open.spotify.com/search/"_q
+						+ QString::fromUtf8(QUrl::toPercentEncoding(full))));
 				return result;
 			}));
 	}

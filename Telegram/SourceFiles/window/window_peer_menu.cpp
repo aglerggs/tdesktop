@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_liquid_features.h"
 #include "data/data_liquid_store.h"
 #include "window/window_liquid_extras.h"
+#include "window/window_liquid_plugins.h"
 
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
@@ -1128,6 +1129,16 @@ void Filler::addLiquidFeatures() {
 				Dialogs::RowDescriptor(history, FullMsgId()));
 		});
 	}, &st::menuIconShowInChat);
+	if (!peer->isSelf() && Window::Liquid::PluginEnabled(u"rename"_q)) {
+		_addAction(u"✏️ Переименовать для себя"_q, [=] {
+			Window::Liquid::ShowLocalRenameBox(controller, peer);
+		}, &st::menuIconEdit);
+	}
+	if (Window::Liquid::PluginEnabled(u"chatsaver"_q)) {
+		_addAction(u"💾 Сохранить чат в файл"_q, [=] {
+			Window::Liquid::SaveChatToFile(controller, history);
+		}, &st::menuIconDownload);
+	}
 	if (!peer->isSelf()) {
 		if (Data::LiquidStore::IsHiddenChat(&peer->session(), peer->id)) {
 			_addAction(u"Вернуть в список чатов"_q, [=] {
@@ -1138,7 +1149,7 @@ void Filler::addLiquidFeatures() {
 				history->updateChatListExistence();
 				controller->showToast(u"Чат снова в списке"_q);
 			}, &st::menuIconUnarchive);
-		} else {
+		} else if (Window::Liquid::PluginEnabled(u"hidden"_q)) {
 			_addAction(u"Скрыть чат 🙈"_q, [=] {
 				Window::Liquid::HideChat(controller, history);
 			}, &st::menuIconStealthLocked);

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 
 #include "data/data_saved_deleted.h"
+#include "data/data_liquid_store.h"
 
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -3079,14 +3080,22 @@ void Session::updateEditedMessage(const MTPMessage &data) {
 		const auto edited = existing->Get<HistoryMessageEdited>();
 		return edited ? edited->date : existing->date();
 	}();
+	const auto regular = (data.type() == mtpc_message);
+	if (regular) {
+		LiquidStore::NotifyEdit({ .item = existing, .before = true });
+	}
 	data.match([](const MTPDmessageEmpty &) {
 	}, [&](const MTPDmessageService &data) {
 		existing->applyEdition(data);
 	}, [&](const auto &data) {
 		existing->applyEdition(HistoryMessageEdition(_session, data));
 	});
-	if (existing->originalText().text != previousText) {
+	const auto changed = (existing->originalText().text != previousText);
+	if (changed) {
 		SavedDeleted::RememberEdit(existing, previousText, previousDate);
+	}
+	if (regular) {
+		LiquidStore::NotifyEdit({ .item = existing, .changed = changed });
 	}
 }
 

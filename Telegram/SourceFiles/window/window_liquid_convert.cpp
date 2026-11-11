@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "window/window_session_controller.h"
 #include "window/window_liquid_text_modes.h"
+#include "window/window_liquid_plugins.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
@@ -289,7 +290,8 @@ QuickStrip::QuickStrip(QWidget *parent, Fn<void(QString)> send)
 	refresh();
 	Data::LiquidStore::ValueChanges(
 	) | rpl::filter([](const QString &key) {
-		return key == QString::fromLatin1(kQuickRepliesKey);
+		return key == QString::fromLatin1(kQuickRepliesKey)
+			|| key == u"plugins"_q;
 	}) | rpl::on_next([=] {
 		refresh();
 	}, lifetime());
@@ -299,7 +301,9 @@ QuickStrip::QuickStrip(QWidget *parent, Fn<void(QString)> send)
 }
 
 void QuickStrip::refresh() {
-	_phrases = QuickReplies();
+	_phrases = PluginEnabled(u"quickreplies"_q)
+		? QuickReplies()
+		: QStringList();
 	resizeToWidth(width());
 	update();
 }

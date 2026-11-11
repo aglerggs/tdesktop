@@ -168,6 +168,65 @@ void SetValue(const QString &key, const QJsonValue &value) {
 	state.valueChanges.fire_copy(key);
 }
 
+namespace {
+
+rpl::event_stream<EditEvent> &EditStream() {
+	static auto result = rpl::event_stream<EditEvent>();
+	return result;
+}
+
+[[nodiscard]] base::flat_map<QString, QString> &RealNames() {
+	static auto result = base::flat_map<QString, QString>();
+	return result;
+}
+
+} // namespace
+
+QString LocalName(not_null<Main::Session*> session, PeerId peer) {
+	if (!Value(u"plugins"_q).toObject().value(u"rename"_q).toBool(true)) {
+		return QString();
+	}
+	return Value(u"localNames"_q).toObject().value(
+		NoteKey(session, peer)).toString();
+}
+
+void SetLocalName(
+		not_null<Main::Session*> session,
+		PeerId peer,
+		const QString &name) {
+	auto all = Value(u"localNames"_q).toObject();
+	const auto key = NoteKey(session, peer);
+	const auto trimmed = name.trimmed();
+	if (trimmed.isEmpty()) {
+		all.remove(key);
+	} else {
+		all.insert(key, trimmed);
+	}
+	SetValue(
+		u"localNames"_q,
+		all.isEmpty() ? QJsonValue() : QJsonValue(all));
+}
+
+void RememberRealName(
+		not_null<Main::Session*> session,
+		PeerId peer,
+		const QString &name) {
+	RealNames()[NoteKey(session, peer)] = name;
+}
+
+QString RealName(not_null<Main::Session*> session, PeerId peer) {
+	const auto i = RealNames().find(NoteKey(session, peer));
+	return (i != end(RealNames())) ? i->second : QString();
+}
+
+void NotifyEdit(EditEvent event) {
+	EditStream().fire(std::move(event));
+}
+
+rpl::producer<EditEvent> EditEvents() {
+	return EditStream().events();
+}
+
 rpl::producer<QString> ValueChanges() {
 	return Current().valueChanges.events();
 }

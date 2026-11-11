@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QJsonValue>
 
+class HistoryItem;
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -115,5 +117,32 @@ void SaveRecognizedTexts(
 	not_null<Main::Session*> session,
 	PeerId peer,
 	const base::flat_map<MsgId, QString> &texts);
+
+// Local chat names: seen only on this computer, the real name is kept
+// in memory to show it and to restore it.
+[[nodiscard]] QString LocalName(
+	not_null<Main::Session*> session,
+	PeerId peer);
+void SetLocalName(
+	not_null<Main::Session*> session,
+	PeerId peer,
+	const QString &name);
+void RememberRealName(
+	not_null<Main::Session*> session,
+	PeerId peer,
+	const QString &name);
+[[nodiscard]] QString RealName(
+	not_null<Main::Session*> session,
+	PeerId peer);
+
+// The text of a message is about to change and has changed: the edit
+// animation snapshots the old bubble on `before` and plays on `changed`.
+struct EditEvent {
+	not_null<HistoryItem*> item;
+	bool before = false;
+	bool changed = false;
+};
+void NotifyEdit(EditEvent event);
+[[nodiscard]] rpl::producer<EditEvent> EditEvents();
 
 } // namespace Data::LiquidStore

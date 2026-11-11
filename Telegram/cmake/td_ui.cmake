@@ -527,6 +527,8 @@ PRIVATE
     ui/controls/popup_selector.cpp
     ui/controls/popup_selector.h
     ui/controls/round_video_recorder_data.h
+    ui/effects/liquid_round_frame.cpp
+    ui/effects/liquid_round_frame.h
     ui/controls/round_video_recorder.cpp
     ui/controls/round_video_recorder.h
     ui/controls/send_as_button.cpp

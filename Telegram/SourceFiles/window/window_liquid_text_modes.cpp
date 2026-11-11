@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/widgets/popup_menu.h"
 #include "window/window_session_controller.h"
+#include "window/window_liquid_plugins.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -44,6 +45,14 @@ struct ModeInfo {
 		{ TextMode::Zalgo, u".zalgo"_q, u"👁 Проклятый текст"_q },
 		{ TextMode::Reverse, u".reverse"_q, u"🔄 Задом наперёд"_q },
 		{ TextMode::Translit, u".translit"_q, u"🔤 Транслит"_q },
+		{ TextMode::Script, u".script"_q, u"𝓢𝓬𝓻𝓲𝓹𝓽"_q },
+		{ TextMode::Bold, u".bold"_q, u"𝐁𝐨𝐥𝐝"_q },
+		{ TextMode::Double, u".double"_q, u"𝔻𝕠𝕦𝕓𝕝𝕖"_q },
+		{ TextMode::SmallCaps, u".small"_q, u"ꜱᴍᴀʟʟ ᴄᴀᴘꜱ"_q },
+		{ TextMode::Bubble, u".bubble"_q, u"ⓑⓤⓑⓑⓛⓔ"_q },
+		{ TextMode::Wide, u".wide"_q, u"Ｗｉｄｅ"_q },
+		{ TextMode::Upside, u".flip"_q, u"ʇxǝʇ ʌǝɹɥ 🙃"_q },
+		{ TextMode::Strike, u".strike"_q, u"З̶а̶ч̶ё̶р̶к̶н̶у̶т̶ы̶й̶"_q },
 	};
 	return result;
 }
@@ -71,7 +80,7 @@ rpl::variable<TextMode> &ModeVariable() {
 	static auto result = rpl::variable<TextMode>([] {
 		const auto value = Data::LiquidStore::Value(
 			QString::fromLatin1(kModeKey)).toInt();
-		return (value > 0 && value <= int(TextMode::Translit))
+		return (value > 0 && value <= int(TextMode::Strike))
 			? TextMode(value)
 			: TextMode::None;
 	}());
@@ -211,6 +220,130 @@ template <typename T>
 	return result;
 }
 
+// Unicode "fonts": they exist for Latin only, so Cyrillic goes through
+// the transliteration first, and digits are styled where possible.
+[[nodiscard]] QString MapLatin(
+		const QString &text,
+		char32_t upper,
+		char32_t lower,
+		char32_t digits,
+		const base::flat_map<QChar, char32_t> &exceptions = {}) {
+	auto result = QString();
+	result.reserve(text.size() * 2);
+	const auto source = Translit(text);
+	for (const auto ch : source) {
+		const auto e = exceptions.find(ch);
+		auto code = char32_t(0);
+		if (e != end(exceptions)) {
+			code = e->second;
+		} else if (ch >= 'A' && ch <= 'Z' && upper) {
+			code = upper + (ch.unicode() - 'A');
+		} else if (ch >= 'a' && ch <= 'z' && lower) {
+			code = lower + (ch.unicode() - 'a');
+		} else if (ch >= '0' && ch <= '9' && digits) {
+			code = digits + (ch.unicode() - '0');
+		}
+		if (code) {
+			result += QString::fromUcs4(&code, 1);
+		} else {
+			result += ch;
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QString Script(const QString &text) {
+	return MapLatin(text, 0x1D4D0, 0x1D4EA, 0);
+}
+
+[[nodiscard]] QString Bold(const QString &text) {
+	return MapLatin(text, 0x1D400, 0x1D41A, 0x1D7CE);
+}
+
+[[nodiscard]] QString Double(const QString &text) {
+	static const auto exceptions = base::flat_map<QChar, char32_t>{
+		{ QChar('C'), 0x2102 }, { QChar('H'), 0x210D },
+		{ QChar('N'), 0x2115 }, { QChar('P'), 0x2119 },
+		{ QChar('Q'), 0x211A }, { QChar('R'), 0x211D },
+		{ QChar('Z'), 0x2124 },
+	};
+	return MapLatin(text, 0x1D538, 0x1D552, 0x1D7D8, exceptions);
+}
+
+[[nodiscard]] QString Bubble(const QString &text) {
+	static const auto exceptions = base::flat_map<QChar, char32_t>{
+		{ QChar('0'), 0x24EA },
+	};
+	return MapLatin(text, 0x24B6, 0x24D0, 0x2460 - 1, exceptions);
+}
+
+[[nodiscard]] QString Wide(const QString &text) {
+	auto result = QString();
+	for (const auto ch : text) {
+		const auto code = ch.unicode();
+		if (code == ' ') {
+			result += QChar(0x3000);
+		} else if (code > 0x20 && code < 0x7F) {
+			result += QChar(code - 0x20 + 0xFF00);
+		} else {
+			result += ch;
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QString SmallCaps(const QString &text) {
+	static const auto map = base::flat_map<QChar, QString>{
+		{ 'a', u"ᴀ"_q }, { 'b', u"ʙ"_q }, { 'c', u"ᴄ"_q }, { 'd', u"ᴅ"_q },
+		{ 'e', u"ᴇ"_q }, { 'f', u"ꜰ"_q }, { 'g', u"ɢ"_q }, { 'h', u"ʜ"_q },
+		{ 'i', u"ɪ"_q }, { 'j', u"ᴊ"_q }, { 'k', u"ᴋ"_q }, { 'l', u"ʟ"_q },
+		{ 'm', u"ᴍ"_q }, { 'n', u"ɴ"_q }, { 'o', u"ᴏ"_q }, { 'p', u"ᴘ"_q },
+		{ 'q', u"ǫ"_q }, { 'r', u"ʀ"_q }, { 's', u"ꜱ"_q }, { 't', u"ᴛ"_q },
+		{ 'u', u"ᴜ"_q }, { 'v', u"ᴠ"_q }, { 'w', u"ᴡ"_q }, { 'x', u"x"_q },
+		{ 'y', u"ʏ"_q }, { 'z', u"ᴢ"_q },
+	};
+	auto result = QString();
+	for (const auto ch : Translit(text).toLower()) {
+		const auto i = map.find(ch);
+		result += (i != end(map)) ? i->second : QString(ch);
+	}
+	return result;
+}
+
+[[nodiscard]] QString Upside(const QString &text) {
+	static const auto map = base::flat_map<QChar, QString>{
+		{ 'a', u"ɐ"_q }, { 'b', u"q"_q }, { 'c', u"ɔ"_q }, { 'd', u"p"_q },
+		{ 'e', u"ǝ"_q }, { 'f', u"ɟ"_q }, { 'g', u"ƃ"_q }, { 'h', u"ɥ"_q },
+		{ 'i', u"ᴉ"_q }, { 'j', u"ɾ"_q }, { 'k', u"ʞ"_q }, { 'l', u"l"_q },
+		{ 'm', u"ɯ"_q }, { 'n', u"u"_q }, { 'o', u"o"_q }, { 'p', u"d"_q },
+		{ 'q', u"b"_q }, { 'r', u"ɹ"_q }, { 's', u"s"_q }, { 't', u"ʇ"_q },
+		{ 'u', u"n"_q }, { 'v', u"ʌ"_q }, { 'w', u"ʍ"_q }, { 'x', u"x"_q },
+		{ 'y', u"ʎ"_q }, { 'z', u"z"_q }, { '.', u"˙"_q }, { ',', u"'"_q },
+		{ '?', u"¿"_q }, { '!', u"¡"_q }, { '(', u")"_q }, { ')', u"("_q },
+		{ '\'', u","_q }, { '_', u"‾"_q }, { '6', u"9"_q }, { '9', u"6"_q },
+	};
+	auto result = QString();
+	const auto source = Translit(text).toLower();
+	for (auto i = source.size(); i > 0;) {
+		const auto ch = source[--i];
+		const auto j = map.find(ch);
+		result += (j != end(map)) ? j->second : QString(ch);
+	}
+	return result;
+}
+
+[[nodiscard]] QString Strike(const QString &text) {
+	auto result = QString();
+	result.reserve(text.size() * 2);
+	for (const auto ch : text) {
+		result += ch;
+		if (!ch.isSpace() && !ch.isSurrogate()) {
+			result += QChar(0x0336);
+		}
+	}
+	return result;
+}
+
 [[nodiscard]] QString ApplyMode(TextMode mode, const QString &text) {
 	switch (mode) {
 	case TextMode::Kawaii: return Kawaii(text);
@@ -220,6 +353,14 @@ template <typename T>
 	case TextMode::Zalgo: return Zalgo(text);
 	case TextMode::Reverse: return Reverse(text);
 	case TextMode::Translit: return Translit(text);
+	case TextMode::Script: return Script(text);
+	case TextMode::Bold: return Bold(text);
+	case TextMode::Double: return Double(text);
+	case TextMode::SmallCaps: return SmallCaps(text);
+	case TextMode::Bubble: return Bubble(text);
+	case TextMode::Wide: return Wide(text);
+	case TextMode::Upside: return Upside(text);
+	case TextMode::Strike: return Strike(text);
 	case TextMode::None: break;
 	}
 	return text;
@@ -264,6 +405,9 @@ template <typename T>
 } // namespace
 
 TextMode CurrentTextMode() {
+	if (!PluginEnabled(u"textmodes"_q)) {
+		return TextMode::None;
+	}
 	return ModeVariable().current();
 }
 
@@ -288,6 +432,9 @@ QString TextModeTitle(TextMode mode) {
 }
 
 TextTransform TransformOutgoing(const QString &text) {
+	if (!PluginEnabled(u"textmodes"_q)) {
+		return {};
+	}
 	const auto trimmed = text.trimmed();
 	if (trimmed.startsWith('.') && !trimmed.contains('\n')) {
 		const auto parts = trimmed.split(' ', Qt::SkipEmptyParts);
@@ -395,6 +542,9 @@ TextTransform TransformOutgoing(const QString &text) {
 void FillTextModeMenu(
 		not_null<Ui::PopupMenu*> menu,
 		Fn<void(QString)> insertCommand) {
+	if (!PluginEnabled(u"textmodes"_q)) {
+		return;
+	}
 	menu->addSeparator();
 	auto modes = std::make_unique<Ui::PopupMenu>(
 		menu->parentWidget(),

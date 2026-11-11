@@ -59,6 +59,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_adaptive.h"
 #include "window/window_session_controller.h"
 #include "window/window_peer_menu.h"
+#include "data/data_liquid_store.h"
+#include "window/window_liquid_plugins.h"
 #include "main/main_session.h"
 #include "media/player/media_player_instance.h"
 #include "dialogs/ui/dialogs_video_userpic.h"
@@ -715,6 +717,18 @@ ListWidget::ListWidget(
 	_session->data().itemRemoved(
 	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
 		itemRemoved(item);
+		_editMorph.remove(item->fullId());
+	}, lifetime());
+
+	Data::LiquidStore::EditEvents(
+	) | rpl::filter([=](const Data::LiquidStore::EditEvent &event) {
+		return (&event.item->history()->session() == _session);
+	}) | rpl::on_next([=](const Data::LiquidStore::EditEvent &event) {
+		if (event.before) {
+			editMorphSnapshot(event.item);
+		} else {
+			editMorphStart(event.item, event.changed);
+		}
 	}, lifetime());
 
 	setupThanosEffect();
@@ -3329,6 +3343,162 @@ bool ListWidget::glassAppearPaint(
 	return true;
 }
 
+namespace {
+
+constexpr auto kEditMorphDuration = crl::time(950);
+
+} // namespace
+
+void ListWidget::editMorphSnapshot(not_null<HistoryItem*> item) {
+	_editMorph.remove(item->fullId());
+	if (!Window::Liquid::PluginEnabled(u"editfx"_q)) {
+		return;
+	}
+	const auto view = viewForItem(item);
+	if (!view) {
+		return;
+	}
+	const auto top = itemTop(view);
+	const auto height = view->height();
+	if (height <= 0
+		|| top + height <= _visibleTop
+		|| top >= _visibleBottom
+		|| width() <= 0) {
+		return;
+	}
+	const auto ratio = style::DevicePixelRatio();
+	auto image = QImage(
+		QSize(width(), height) * ratio,
+		QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(ratio);
+	image.fill(Qt::transparent);
+	{
+		auto p = Painter(&image);
+		auto context = preparePaintContext(
+			QRect(0, top, width(), height)).translated(0, -top);
+		context.outbg = view->hasOutLayout();
+		view->draw(p, context);
+	}
+	_editMorph[item->fullId()] = EditMorph{
+		.old = std::move(image),
+		.inner = view->innerGeometry(),
+	};
+}
+
+void ListWidget::editMorphStart(not_null<HistoryItem*> item, bool changed) {
+	const auto i = _editMorph.find(item->fullId());
+	if (i == end(_editMorph)) {
+		return;
+	} else if (!changed) {
+		_editMorph.erase(i);
+		return;
+	}
+	i->second.start = crl::now();
+	if (!_editMorphTicker.animating()) {
+		_editMorphTicker.init([=] { editMorphStep(); });
+		_editMorphTicker.start();
+	}
+	update();
+}
+
+void ListWidget::editMorphStep() {
+	const auto now = crl::now();
+	for (auto i = begin(_editMorph); i != end(_editMorph);) {
+		if (i->second.start && now - i->second.start >= kEditMorphDuration) {
+			i = _editMorph.erase(i);
+		} else {
+			++i;
+		}
+	}
+	if (ranges::none_of(_editMorph, [](const auto &pair) {
+		return pair.second.start != 0;
+	})) {
+		_editMorphTicker.stop();
+	}
+	update();
+}
+
+bool ListWidget::editMorphPaint(
+		Painter &p,
+		not_null<Element*> view,
+		const Fn<void()> &draw) {
+	if (_editMorph.empty()) {
+		return false;
+	}
+	const auto i = _editMorph.find(view->data()->fullId());
+	if (i == end(_editMorph) || !i->second.start) {
+		return false;
+	}
+	const auto &morph = i->second;
+	const auto t = std::clamp(
+		(crl::now() - morph.start) / float64(kEditMorphDuration),
+		0.,
+		1.);
+	const auto inner = view->innerGeometry();
+	const auto united = inner.united(morph.inner);
+	const auto height = std::max(
+		view->height(),
+		int(morph.old.height() / morph.old.devicePixelRatio()));
+	const auto glow = std::max(united.height() * 0.6, 36.);
+	const auto progress = anim::easeOutCubic(1., t);
+	const auto edge = united.x() - glow
+		+ (united.width() + 2. * glow) * progress;
+
+	// The new text is already written behind the light edge...
+	p.save();
+	p.setClipRect(QRectF(0, -height, std::max(edge, 0.), 3 * height));
+	p.setOpacity(0.35 + 0.65 * std::min(1., t * 1.6));
+	draw();
+	p.restore();
+
+	// ...while the old one is still ahead of it, fading and melting.
+	p.save();
+	p.setClipRect(QRectF(edge, -height, width() * 2., 3 * height));
+	p.setOpacity(1. - 0.55 * t);
+	const auto lift = 4. * t;
+	p.drawImage(QPointF(0., -lift), morph.old);
+	p.restore();
+
+	// The light edge itself, inside the bubble shape, with a few sparks.
+	const auto strength = std::sin(t * M_PI);
+	if (strength > 0.01 && !united.isEmpty()) {
+		auto hq = PainterHighQualityEnabler(p);
+		const auto radius = float64(st::bubbleRadiusLarge);
+		auto shape = QPainterPath();
+		shape.addRoundedRect(QRectF(united), radius, radius);
+		auto accent = st::windowActiveTextFg->c;
+		auto gradient = QLinearGradient(
+			QPointF(edge - glow, 0),
+			QPointF(edge + glow * 0.35, 0));
+		accent.setAlpha(0);
+		gradient.setColorAt(0., accent);
+		accent.setAlpha(int(90 * strength));
+		gradient.setColorAt(0.7, accent);
+		gradient.setColorAt(0.93, QColor(255, 255, 255, int(200 * strength)));
+		gradient.setColorAt(1., QColor(255, 255, 255, 0));
+		p.save();
+		p.setClipPath(shape, Qt::IntersectClip);
+		p.setPen(Qt::NoPen);
+		p.setBrush(gradient);
+		p.drawRect(QRectF(edge - glow, united.y(), glow * 1.35, united.height()));
+		p.restore();
+
+		const auto seed = uint32(view->data()->id.bare * 2654435761u);
+		for (auto k = 0; k != 7; ++k) {
+			const auto hash = (seed ^ (k * 0x9E3779B9u)) * 2246822519u;
+			const auto fy = ((hash >> 8) & 0xFFFF) / 65535.;
+			const auto drift = ((hash >> 3) & 0x1F) / 31.;
+			const auto size = 1.5 + ((hash >> 24) & 0x3) * 0.7;
+			const auto x = edge - glow * 0.15 * drift - 10. * t * drift;
+			const auto y = united.y() + 4 + (united.height() - 8) * fy
+				- 8. * t * drift;
+			p.setBrush(QColor(255, 255, 255, int(220 * strength)));
+			p.drawEllipse(QPointF(x, y), size, size);
+		}
+	}
+	return true;
+}
+
 void ListWidget::revealItemsCallback() {
 	auto revealHeight = _itemRevealLift.revealHeight();
 	for (auto i = begin(_itemRevealAnimations)
@@ -3683,8 +3853,10 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 			context.fullMessageSelected = selection.fullMessageSelected;
 			context.messageSelection = selection.messageSelection;
 			context.highlight = _highlighter.state(item);
-			if (!glassAppearPaint(p, view, [&] { view->draw(p, context); })) {
-				view->draw(p, context);
+			const auto draw = [&] { view->draw(p, context); };
+			if (!glassAppearPaint(p, view, draw)
+				&& !editMorphPaint(p, view, draw)) {
+				draw();
 			}
 		}
 		if (_translateTracker) {
